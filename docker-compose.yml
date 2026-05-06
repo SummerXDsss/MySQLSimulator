@@ -1,0 +1,12 @@
+services:
+  mysql-simulator:
+    build: .
+    container_name: mysql-simulator
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      SQLM_SECRET: change-this-secret-before-deploy

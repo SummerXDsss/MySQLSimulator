@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MySQL 操作台</title>
+    <meta name="description" content="MySQL 模拟器操作台，支持 SQL 执行、结果展示、可视化表和可视化转 SQL。" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="console-page">
+    <nav class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="/" aria-label="MySQL 模拟器">
+          <span class="brand-mark">SQL</span>
+          <span>MySQL 操作台</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">介绍</a>
+          <a href="#visual">可视化</a>
+          <a href="#results">结果</a>
+        </div>
+        <a class="nav-action" href="/">
+          返回首页
+          <i data-lucide="arrow-right"></i>
+        </a>
+      </div>
+    </nav>
+
+    <main>
+      <section id="simulator" class="section simulator-section console-section">
+        <div class="container simulator-container">
+          <div class="section-heading">
+            <p class="eyebrow">INTERACTIVE IDE</p>
+            <h2>MySQL 模拟操作台</h2>
+            <p>写 SQL、看结果、浏览表数据，也可以用表单反向生成 SQL。</p>
+          </div>
+
+          <div class="ide-shell">
+            <aside class="ide-sidebar">
+              <div class="panel-title">
+                <i data-lucide="database"></i>
+                数据库
+              </div>
+              <div id="schemaTree" class="schema-tree"></div>
+              <div class="panel-title examples-title">
+                <i data-lucide="book-open"></i>
+                示例
+              </div>
+              <div id="exampleList" class="example-list"></div>
+              <div class="panel-title examples-title">
+                <i data-lucide="terminal"></i>
+                日志
+              </div>
+              <div id="consoleLog" class="console-log"></div>
+            </aside>
+
+            <section class="ide-main" aria-label="SQL 编辑器">
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <span class="status-dot"></span>
+                  <span id="currentDb">shop_demo</span>
+                </div>
+                <div class="toolbar-actions">
+                  <button id="formatBtn" class="icon-button" type="button" title="整理 SQL">
+                    <i data-lucide="align-left"></i>
+                  </button>
+                  <button id="copyBtn" class="icon-button" type="button" title="复制 SQL">
+                    <i data-lucide="copy"></i>
+                  </button>
+                  <button id="resetBtn" class="icon-button" type="button" title="重置数据">
+                    <i data-lucide="rotate-ccw"></i>
+                  </button>
+                  <button id="importSqlmBtn" class="icon-button" type="button" title="上传 sqlm">
+                    <i data-lucide="upload"></i>
+                  </button>
+                  <button id="exportSqlmBtn" class="icon-button" type="button" title="下载 sqlm">
+                    <i data-lucide="download"></i>
+                  </button>
+                  <button id="loadVisualBtn" class="icon-button" type="button" title="查看当前表">
+                    <i data-lucide="panel-bottom-open"></i>
+                  </button>
+                  <button id="runBtn" class="run-button" type="button">
+                    <i data-lucide="play"></i>
+                    运行
+                  </button>
+                  <input id="sqlmFileInput" type="file" accept=".sqlm" hidden />
+                </div>
+              </div>
+
+              <div class="workspace-grid">
+                <div class="editor-card">
+                  <div class="editor-wrap">
+                    <div class="line-numbers" id="lineNumbers">1</div>
+                    <textarea id="sqlEditor" spellcheck="false" aria-label="SQL 编辑器"></textarea>
+                  </div>
+                </div>
+
+                <aside id="visual" class="builder-panel" aria-label="可视化转 SQL">
+                  <div class="panel-title">
+                    <i data-lucide="wand-2"></i>
+                    可视化转 SQL
+                  </div>
+                  <div class="builder-grid">
+                    <label>
+                      操作
+                      <select id="builderAction">
+                        <option value="select">SELECT 查询</option>
+                        <option value="insert">INSERT 新增</option>
+                        <option value="update">UPDATE 更新</option>
+                        <option value="delete">DELETE 删除</option>
+                      </select>
+                    </label>
+                    <label>
+                      数据库
+                      <select id="builderDatabase"></select>
+                    </label>
+                    <label>
+                      表
+                      <select id="builderTable"></select>
+                    </label>
+                  </div>
+
+                  <div class="builder-block">
+                    <div class="builder-label">字段</div>
+                    <div id="builderColumns" class="builder-columns"></div>
+                  </div>
+
+                  <div id="builderValuesBlock" class="builder-block">
+                    <div class="builder-label">字段值</div>
+                    <div id="builderValues" class="builder-values"></div>
+                  </div>
+
+                  <div class="builder-grid">
+                    <label>
+                      条件字段
+                      <select id="builderWhereColumn"></select>
+                    </label>
+                    <label>
+                      条件
+                      <select id="builderOperator">
+                        <option value="=">=</option>
+                        <option value="!=">!=</option>
+                        <option value=">">&gt;</option>
+                        <option value="<">&lt;</option>
+                        <option value="like">LIKE</option>
+                      </select>
+                    </label>
+                    <label>
+                      条件值
+                      <input id="builderWhereValue" type="text" placeholder="例如 paid" />
+                    </label>
+                  </div>
+
+                  <div class="builder-grid select-options">
+                    <label>
+                      排序
+                      <select id="builderOrderColumn"></select>
+                    </label>
+                    <label>
+                      方向
+                      <select id="builderOrderDirection">
+                        <option value="ASC">ASC</option>
+                        <option value="DESC">DESC</option>
+                      </select>
+                    </label>
+                    <label>
+                      Limit
+                      <input id="builderLimit" type="number" min="1" max="100" value="10" />
+                    </label>
+                  </div>
+
+                  <label class="generated-label">
+                    生成的 SQL
+                    <textarea id="generatedSql" readonly></textarea>
+                  </label>
+                  <div class="builder-actions">
+                    <button id="applyGeneratedBtn" class="ghost-button" type="button">
+                      <i data-lucide="file-input"></i>
+                      放入编辑器
+                    </button>
+                    <button id="runGeneratedBtn" class="primary-small" type="button">
+                      <i data-lucide="play"></i>
+                      运行生成 SQL
+                    </button>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="output-grid">
+                <section class="visual-table-panel" aria-label="可视化表">
+                  <div class="result-header">
+                    <div>
+                      <i data-lucide="table-properties"></i>
+                      可视化表
+                    </div>
+                    <div class="visual-controls">
+                      <select id="visualTableSelect"></select>
+                      <button id="refreshTableBtn" class="icon-button compact" type="button" title="刷新表">
+                        <i data-lucide="refresh-cw"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="visualTableMeta" class="result-summary"></div>
+                  <div id="visualTablePanel" class="result-panel visual-table-body"></div>
+                </section>
+
+                <section id="results" class="result-wrap" aria-label="结果展示">
+                  <div class="result-header">
+                    <div>
+                      <i data-lucide="table-2"></i>
+                      结果展示
+                    </div>
+                    <span id="elapsedTime">未运行</span>
+                  </div>
+                  <div id="resultSummary" class="result-summary"></div>
+                  <div id="resultTabs" class="result-tabs"></div>
+                  <div id="resultPanel" class="result-panel"></div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="inspector">
+              <div class="panel-title">
+                <i data-lucide="list-checks"></i>
+                支持指令
+              </div>
+              <ul class="command-list">
+                <li>CREATE / DROP / ALTER / TRUNCATE</li>
+                <li>INSERT / SELECT / UPDATE / DELETE</li>
+                <li>SHOW / DESC / EXPLAIN / USE</li>
+                <li>BEGIN / COMMIT / ROLLBACK</li>
+                <li>SET / HELP / 常用管理指令模拟</li>
+              </ul>
+              <div class="panel-title command-title">
+                <i data-lucide="sparkles"></i>
+                工作台
+              </div>
+              <p class="inspector-copy">选择左侧表名可直接查看数据。右侧表单会同步字段，用来生成查询、新增、更新或删除 SQL。</p>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

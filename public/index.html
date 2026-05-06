@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MySQL 模拟器</title>
+    <meta name="description" content="一个用于学习、演示和验证 MySQL 指令的在线模拟器。" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="home-page">
+    <nav class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="#top" aria-label="MySQL 模拟器">
+          <span class="brand-mark">SQL</span>
+          <span>MySQL 模拟器</span>
+        </a>
+        <div class="nav-links">
+          <a href="/console.html">操作台</a>
+          <a href="#features">能力</a>
+          <a href="#workflow">流程</a>
+        </div>
+        <a class="nav-action" href="/console.html">
+          开始体验
+          <i data-lucide="arrow-right"></i>
+        </a>
+      </div>
+    </nav>
+
+    <main id="top">
+      <section class="hero section">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">MYSQL COMMAND SANDBOX</p>
+            <h1>在浏览器里练习 MySQL 指令，像 IDE 一样立即看到结果。</h1>
+            <p class="hero-text">
+              面向教学、面试准备和产品演示的 MySQL 模拟器。支持常用建库建表、增删改查、事务、元信息和表结构调整，所有操作都在本地模拟数据中完成。
+            </p>
+            <div class="hero-actions">
+              <a class="primary-button" href="/console.html">
+                <i data-lucide="play"></i>
+                打开模拟器
+              </a>
+              <a class="ghost-link" href="#features">
+                查看支持范围
+                <i data-lucide="chevron-right"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="hero-product" aria-label="模拟器预览">
+            <div class="mini-window-top">
+              <span></span>
+              <span></span>
+              <span></span>
+              <strong>shop_demo</strong>
+            </div>
+            <div class="mini-editor">
+              <code>SELECT id, status, total_amount</code>
+              <code>FROM orders</code>
+              <code>WHERE status = 'paid'</code>
+              <code>ORDER BY id DESC;</code>
+            </div>
+            <div class="mini-result">
+              <div class="mini-row mini-head">
+                <span>id</span>
+                <span>status</span>
+                <span>total_amount</span>
+              </div>
+              <div class="mini-row">
+                <span>1004</span>
+                <span>paid</span>
+                <span>171.50</span>
+              </div>
+              <div class="mini-row">
+                <span>1001</span>
+                <span>paid</span>
+                <span>231.40</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-bar">
+        <div class="container proof-grid">
+          <div>
+            <strong>40+</strong>
+            <span>常见 SQL 指令形态</span>
+          </div>
+          <div>
+            <strong>DDL / DML</strong>
+            <span>覆盖建模与数据操作</span>
+          </div>
+          <div>
+            <strong>本地状态</strong>
+            <span>可重置、可事务回滚</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="simulator" class="section simulator-section">
+        <div class="container simulator-container">
+          <div class="section-heading">
+            <p class="eyebrow">INTERACTIVE IDE</p>
+            <h2>操作台已单独分页</h2>
+            <p>进入独立操作台后，可以执行 SQL、查看结果、浏览可视化表，也可以用表单生成 SQL。</p>
+          </div>
+          <div class="console-entry">
+            <div>
+              <h3>MySQL 模拟操作台</h3>
+              <p>独立页面保留完整宽度，适合长时间写 SQL 和查看表格结果。</p>
+            </div>
+            <a class="primary-button" href="/console.html">
+              <i data-lucide="arrow-right"></i>
+              进入操作台
+            </a>
+          </div>
+
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-heading compact">
+            <p class="eyebrow">FEATURES</p>
+            <h2>用于教学和演示的完整模拟能力</h2>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <div class="feature-icon"><i data-lucide="layers"></i></div>
+              <h3>库表结构管理</h3>
+              <p>支持创建数据库、创建表、修改列、索引展示、删除表和查看建表语句。</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-icon"><i data-lucide="rows-3"></i></div>
+              <h3>数据读写模拟</h3>
+              <p>可执行插入、查询、条件过滤、排序、限制数量、更新和删除。</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-icon"><i data-lucide="history"></i></div>
+              <h3>事务状态回放</h3>
+              <p>BEGIN、COMMIT、ROLLBACK 会维护模拟快照，便于讲解事务影响。</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-icon"><i data-lucide="search-code"></i></div>
+              <h3>执行反馈清晰</h3>
+              <p>结果表、影响行数、错误提示和执行耗时会同步展示。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section">
+        <div class="container workflow-grid">
+          <div>
+            <p class="eyebrow">WORKFLOW</p>
+            <h2>从指令到结果，只保留必要步骤。</h2>
+          </div>
+          <div class="workflow-list">
+            <div>
+              <span>01</span>
+              <p>选择示例或直接输入 SQL。</p>
+            </div>
+            <div>
+              <span>02</span>
+              <p>运行后端模拟器，更新本地数据库状态。</p>
+            </div>
+            <div>
+              <span>03</span>
+              <p>查看表格结果、日志和实时结构树。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <span>MySQL Simulator</span>
+        <span>Local SQL sandbox for demos and learning.</span>
+      </div>
+    </footer>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script>
+      window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
+    </script>
+  </body>
+</html>
