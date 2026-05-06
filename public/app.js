@@ -1,5 +1,9 @@
 const sqlEditor = document.querySelector("#sqlEditor");
 const lineNumbers = document.querySelector("#lineNumbers");
+const highlightCode = document.querySelector("#highlightCode");
+const suggestPanel = document.querySelector("#suggestPanel");
+const suggestionList = document.querySelector("#suggestionList");
+const suggestStatus = document.querySelector("#suggestStatus");
 const runBtn = document.querySelector("#runBtn");
 const resetBtn = document.querySelector("#resetBtn");
 const importSqlmBtn = document.querySelector("#importSqlmBtn");
@@ -8,6 +12,7 @@ const sqlmFileInput = document.querySelector("#sqlmFileInput");
 const copyBtn = document.querySelector("#copyBtn");
 const formatBtn = document.querySelector("#formatBtn");
 const loadVisualBtn = document.querySelector("#loadVisualBtn");
+const themeToggle = document.querySelector("#themeToggle");
 const currentDb = document.querySelector("#currentDb");
 const schemaTree = document.querySelector("#schemaTree");
 const exampleList = document.querySelector("#exampleList");
@@ -15,6 +20,7 @@ const resultTabs = document.querySelector("#resultTabs");
 const resultSummary = document.querySelector("#resultSummary");
 const resultPanel = document.querySelector("#resultPanel");
 const elapsedTime = document.querySelector("#elapsedTime");
+const resultState = document.querySelector("#resultState");
 const consoleLog = document.querySelector("#consoleLog");
 const visualTableSelect = document.querySelector("#visualTableSelect");
 const refreshTableBtn = document.querySelector("#refreshTableBtn");
@@ -40,6 +46,8 @@ let results = [];
 let activeResultIndex = 0;
 let schemaState = null;
 let selectedVisualTable = { database: "shop_demo", table: "orders" };
+let editorSuggestions = [];
+let sidebarSuggestions = [];
 
 const defaultSql = `SELECT VERSION();
 SELECT DATABASE();
@@ -49,6 +57,44 @@ FROM orders
 WHERE status = 'paid'
 ORDER BY id DESC
 LIMIT 5;`;
+
+const keywordSuggestions = [
+  { label: "SELECT", insert: "SELECT ", detail: "查询数据", type: "关键词" },
+  { label: "FROM", insert: "FROM ", detail: "指定表", type: "关键词" },
+  { label: "WHERE", insert: "WHERE ", detail: "过滤条件", type: "关键词" },
+  { label: "ORDER BY", insert: "ORDER BY ", detail: "排序", type: "关键词" },
+  { label: "GROUP BY", insert: "GROUP BY ", detail: "分组", type: "关键词" },
+  { label: "LIMIT", insert: "LIMIT ", detail: "限制条数", type: "关键词" },
+  { label: "INSERT INTO", insert: "INSERT INTO ", detail: "新增数据", type: "关键词" },
+  { label: "UPDATE", insert: "UPDATE ", detail: "更新数据", type: "关键词" },
+  { label: "DELETE FROM", insert: "DELETE FROM ", detail: "删除数据", type: "关键词" },
+  { label: "CREATE TABLE", insert: "CREATE TABLE ", detail: "创建表", type: "关键词" },
+  { label: "ALTER TABLE", insert: "ALTER TABLE ", detail: "修改表结构", type: "关键词" },
+  { label: "SHOW TABLES", insert: "SHOW TABLES;", detail: "查看表", type: "指令" },
+  { label: "DESC", insert: "DESC ", detail: "查看字段", type: "指令" },
+  { label: "EXPLAIN", insert: "EXPLAIN ", detail: "模拟执行计划", type: "指令" },
+  { label: "BEGIN", insert: "BEGIN;", detail: "开启事务", type: "事务" },
+  { label: "COMMIT", insert: "COMMIT;", detail: "提交事务", type: "事务" },
+  { label: "ROLLBACK", insert: "ROLLBACK;", detail: "回滚事务", type: "事务" }
+];
+
+const snippetSuggestions = [
+  { label: "SELECT * FROM", insert: "SELECT *\nFROM ", detail: "基础查询片段", type: "片段" },
+  { label: "SELECT WHERE LIMIT", insert: "SELECT *\nFROM orders\nWHERE status = 'paid'\nLIMIT 10;", detail: "条件查询片段", type: "片段" },
+  { label: "INSERT VALUES", insert: "INSERT INTO customers (name, email, city, vip_level)\nVALUES ('Demo User', 'demo@example.com', 'Shanghai', 'standard');", detail: "新增客户片段", type: "片段" },
+  { label: "UPDATE WHERE", insert: "UPDATE orders\nSET status = 'paid'\nWHERE id = 1003;", detail: "条件更新片段", type: "片段" },
+  { label: "TRANSACTION", insert: "START TRANSACTION;\nSELECT * FROM orders;\nROLLBACK;", detail: "事务片段", type: "片段" }
+];
+
+const sqlKeywordSet = new Set([
+  "ADD", "ALTER", "AND", "AS", "ASC", "AUTO_INCREMENT", "BEGIN", "BY", "COLUMN", "COMMIT",
+  "CREATE", "DATABASE", "DATABASES", "DEFAULT", "DELETE", "DESC", "DESCRIBE", "DROP", "EXPLAIN",
+  "FROM", "GROUP", "HELP", "INDEX", "INSERT", "INTO", "KEY", "LIKE", "LIMIT", "NOT", "NULL",
+  "ORDER", "PRIMARY", "RENAME", "ROLLBACK", "SELECT", "SET", "SHOW", "START", "TABLE", "TABLES",
+  "TO", "TRANSACTION", "TRUNCATE", "UPDATE", "USE", "VALUES", "WHERE"
+]);
+
+const sqlFunctionSet = new Set(["AVG", "COUNT", "DATABASE", "MAX", "MIN", "NOW", "SUM", "USER", "VERSION"]);
 
 function iconRefresh() {
   if (window.lucide) {
@@ -67,6 +113,75 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = nextTheme;
+  localStorage.setItem("mysql-simulator-theme", nextTheme);
+  themeToggle.innerHTML = nextTheme === "dark"
+    ? '<i data-lucide="sun"></i><span>浅色模式</span>'
+    : '<i data-lucide="moon"></i><span>深色模式</span>';
+  iconRefresh();
+}
+
+function initTheme() {
+  const activeTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  applyTheme(activeTheme);
+}
+
+function setResultState(state, label) {
+  resultState.className = `status-badge ${state}`;
+  resultState.textContent = label;
+}
+
+function highlightSql(sql) {
+  const tokenPattern = /(--[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|''|[^'])*'|"(?:\\.|[^"])*"|`[^`]*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w$]*\b|<>|!=|<=|>=|:=|[(),.;=*<>+-])/g;
+  let html = "";
+  let cursor = 0;
+  let match;
+
+  while ((match = tokenPattern.exec(sql)) !== null) {
+    const token = match[0];
+    html += escapeHtml(sql.slice(cursor, match.index));
+    const upperToken = token.toUpperCase();
+
+    if (token.startsWith("--") || token.startsWith("/*")) {
+      html += `<span class="sql-comment">${escapeHtml(token)}</span>`;
+    } else if (token.startsWith("'") || token.startsWith('"') || token.startsWith("`")) {
+      html += `<span class="sql-string">${escapeHtml(token)}</span>`;
+    } else if (/^\d/.test(token)) {
+      html += `<span class="sql-number">${escapeHtml(token)}</span>`;
+    } else if (sqlKeywordSet.has(upperToken)) {
+      html += `<span class="sql-keyword">${escapeHtml(token)}</span>`;
+    } else if (sqlFunctionSet.has(upperToken)) {
+      html += `<span class="sql-function">${escapeHtml(token)}</span>`;
+    } else if (/^[(),.;=*<>+-]|<>|!=|<=|>=|:=$/.test(token)) {
+      html += `<span class="sql-operator">${escapeHtml(token)}</span>`;
+    } else {
+      html += escapeHtml(token);
+    }
+
+    cursor = match.index + token.length;
+  }
+
+  html += escapeHtml(sql.slice(cursor));
+  return html || "\n";
+}
+
+function syncEditorScroll() {
+  lineNumbers.scrollTop = sqlEditor.scrollTop;
+  highlightCode.style.transform = `translate(${-sqlEditor.scrollLeft}px, ${-sqlEditor.scrollTop}px)`;
+}
+
+function updateHighlight() {
+  highlightCode.innerHTML = `${highlightSql(sqlEditor.value)}\n`;
+  syncEditorScroll();
+}
+
+function updateEditorVisuals() {
+  updateLineNumbers();
+  updateHighlight();
 }
 
 function quoteSqlValue(value) {
@@ -88,6 +203,144 @@ function getTables(databaseName) {
 
 function getSelectedTable() {
   return getTables(selectedVisualTable.database).find((table) => table.name === selectedVisualTable.table) || null;
+}
+
+function getCurrentWord() {
+  const cursor = sqlEditor.selectionStart || 0;
+  const prefix = sqlEditor.value.slice(0, cursor);
+  const match = prefix.match(/[A-Za-z_][\w.]*$/);
+  const word = match?.[0] || "";
+  return {
+    word,
+    start: cursor - word.length,
+    end: cursor
+  };
+}
+
+function uniqueSuggestions(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = `${item.label}:${item.insert}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getSchemaSuggestionItems() {
+  if (!schemaState) return [];
+  const items = [];
+  getDatabases().forEach((database) => {
+    items.push({ label: database.name, insert: database.name, detail: "数据库", type: "库" });
+    database.tables.forEach((table) => {
+      items.push({ label: table.name, insert: table.name, detail: `${database.name} · 表`, type: "表" });
+      table.columns.forEach((column) => {
+        items.push({
+          label: column.name,
+          insert: column.name,
+          detail: `${table.name} · ${column.type}`,
+          type: "字段"
+        });
+        items.push({
+          label: `${table.name}.${column.name}`,
+          insert: `${table.name}.${column.name}`,
+          detail: column.type,
+          type: "字段"
+        });
+      });
+    });
+  });
+  return items;
+}
+
+function buildSuggestions(query = "") {
+  const normalizedQuery = query.trim().toLowerCase();
+  const items = uniqueSuggestions([
+    ...keywordSuggestions,
+    ...snippetSuggestions,
+    ...getSchemaSuggestionItems()
+  ]);
+
+  if (!normalizedQuery) return items;
+
+  return items
+    .filter((item) => `${item.label} ${item.insert} ${item.detail}`.toLowerCase().includes(normalizedQuery))
+    .sort((first, second) => {
+      const firstStarts = first.label.toLowerCase().startsWith(normalizedQuery) ? 0 : 1;
+      const secondStarts = second.label.toLowerCase().startsWith(normalizedQuery) ? 0 : 1;
+      return firstStarts - secondStarts || first.label.localeCompare(second.label);
+    });
+}
+
+function renderSidebarSuggestions() {
+  const table = getSelectedTable();
+  const selectedColumns = table?.columns?.slice(0, 8).map((column) => ({
+    label: column.name,
+    insert: column.name,
+    detail: `${table.name} · ${column.type}`,
+    type: "字段"
+  })) || [];
+  sidebarSuggestions = uniqueSuggestions([
+    ...keywordSuggestions.slice(0, 8),
+    ...selectedColumns,
+    ...snippetSuggestions.slice(0, 3)
+  ]).slice(0, 18);
+
+  suggestionList.innerHTML = sidebarSuggestions.map((item, index) => `
+    <button class="suggestion-chip" type="button" data-sidebar-suggestion="${index}" title="${escapeHtml(item.detail)}">
+      ${escapeHtml(item.label)}
+    </button>
+  `).join("");
+
+  suggestionList.querySelectorAll("[data-sidebar-suggestion]").forEach((button) => {
+    button.addEventListener("click", () => {
+      insertSuggestion(sidebarSuggestions[Number(button.dataset.sidebarSuggestion)]);
+    });
+  });
+}
+
+function renderSuggestPanel(force = false) {
+  const current = getCurrentWord();
+  const shouldShow = force || current.word.length > 0;
+  editorSuggestions = buildSuggestions(current.word).slice(0, 9);
+
+  if (!shouldShow || !editorSuggestions.length) {
+    suggestPanel.hidden = true;
+    suggestStatus.textContent = current.word ? "无匹配提示" : "输入 SQL 获取提示";
+    return;
+  }
+
+  suggestStatus.textContent = `${editorSuggestions.length} 个提示`;
+  suggestPanel.hidden = false;
+  suggestPanel.innerHTML = editorSuggestions.map((item, index) => `
+    <button class="suggest-option" type="button" data-editor-suggestion="${index}">
+      <span>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.detail)}</small>
+      </span>
+      <em>${escapeHtml(item.type)}</em>
+    </button>
+  `).join("");
+
+  suggestPanel.querySelectorAll("[data-editor-suggestion]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      insertSuggestion(editorSuggestions[Number(button.dataset.editorSuggestion)]);
+    });
+  });
+}
+
+function insertSuggestion(item) {
+  if (!item) return;
+  const current = getCurrentWord();
+  const before = sqlEditor.value.slice(0, current.start);
+  const after = sqlEditor.value.slice(current.end);
+  sqlEditor.value = `${before}${item.insert}${after}`;
+  const cursor = before.length + item.insert.length;
+  sqlEditor.setSelectionRange(cursor, cursor);
+  updateEditorVisuals();
+  renderSuggestPanel(false);
+  sqlEditor.focus();
 }
 
 function getFirstTable(schema) {
@@ -127,7 +380,8 @@ function formatSql() {
     .replace(/\s+(FROM|WHERE|ORDER BY|GROUP BY|LIMIT|VALUES|SET)\s+/g, "\n$1 ")
     .trim();
   sqlEditor.value = value.endsWith(";") ? value : `${value};`;
-  updateLineNumbers();
+  updateEditorVisuals();
+  renderSuggestPanel(false);
 }
 
 async function fetchJson(url, options = {}) {
@@ -181,6 +435,7 @@ function renderSchema(schema) {
   });
   renderVisualTableOptions();
   renderBuilderControls();
+  renderSidebarSuggestions();
 }
 
 function renderExamples(examples) {
@@ -194,7 +449,7 @@ function renderExamples(examples) {
     button.addEventListener("click", () => {
       const example = examples[Number(button.dataset.example)];
       sqlEditor.value = example.sql;
-      updateLineNumbers();
+      updateEditorVisuals();
       sqlEditor.focus();
     });
   });
@@ -356,7 +611,7 @@ function renderResultTabs() {
   }
   resultTabs.innerHTML = results.map((result, index) => `
     <button class="result-tab ${index === activeResultIndex ? "active" : ""}" type="button" data-result="${index}">
-      #${index + 1} ${result.kind === "error" ? "Error" : result.kind === "table" ? "Table" : "OK"}
+      #${index + 1} ${result.kind === "error" ? "错误" : result.kind === "table" ? "表格" : "消息"}
     </button>
   `).join("");
   resultTabs.querySelectorAll("[data-result]").forEach((button) => {
@@ -463,7 +718,9 @@ function addSystemLog(title, detail, ok = true) {
 
 async function runSql() {
   runBtn.disabled = true;
-  runBtn.innerHTML = '<i data-lucide="loader-circle"></i> 运行中';
+  setResultState("running", "执行中");
+  elapsedTime.textContent = "运行中";
+  runBtn.innerHTML = '<i data-lucide="loader-circle"></i><span>执行中</span><small>请稍候</small>';
   iconRefresh();
   try {
     const payload = await fetchJson("/api/query", {
@@ -473,6 +730,7 @@ async function runSql() {
     results = payload.results || [];
     activeResultIndex = 0;
     elapsedTime.textContent = `${payload.elapsedMs} ms`;
+    setResultState(payload.ok ? "success" : "error", payload.ok ? "执行成功" : "执行失败");
     renderSchema(payload.schema);
     renderResults();
     addLog(payload);
@@ -481,10 +739,11 @@ async function runSql() {
     results = [{ kind: "error", message: error.message, columns: [], rows: [] }];
     activeResultIndex = 0;
     elapsedTime.textContent = "失败";
+    setResultState("error", "执行失败");
     renderResults();
   } finally {
     runBtn.disabled = false;
-    runBtn.innerHTML = '<i data-lucide="play"></i> 运行';
+    runBtn.innerHTML = '<i data-lucide="play"></i><span>执行 SQL</span><small>Ctrl Enter</small>';
     iconRefresh();
   }
 }
@@ -495,6 +754,7 @@ async function resetState() {
   results = [];
   activeResultIndex = 0;
   elapsedTime.textContent = "已重置";
+  setResultState("idle", "已重置");
   renderResults();
   addSystemLog("已重置", "模拟数据库恢复到初始状态");
   await loadVisualTable();
@@ -528,14 +788,17 @@ async function importSqlm(file) {
   results = [];
   activeResultIndex = 0;
   elapsedTime.textContent = "已导入";
+  setResultState("success", "导入成功");
   renderResults();
   addSystemLog("已导入 sqlm", payload.message || "文件已解密并恢复");
   await loadVisualTable();
 }
 
 async function bootstrap() {
+  initTheme();
   sqlEditor.value = defaultSql;
-  updateLineNumbers();
+  updateEditorVisuals();
+  setResultState("idle", "等待执行");
   renderResults();
 
   const [state, examplePayload] = await Promise.all([
@@ -545,19 +808,43 @@ async function bootstrap() {
   renderSchema(state);
   renderExamples(examplePayload.examples);
   await loadVisualTable();
+  renderSuggestPanel(false);
   iconRefresh();
 }
 
-sqlEditor.addEventListener("input", updateLineNumbers);
+sqlEditor.addEventListener("input", () => {
+  updateEditorVisuals();
+  renderSuggestPanel(false);
+});
 sqlEditor.addEventListener("scroll", () => {
-  lineNumbers.scrollTop = sqlEditor.scrollTop;
+  syncEditorScroll();
 });
 
 sqlEditor.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     runSql();
+    return;
   }
+  if ((event.metaKey || event.ctrlKey) && event.code === "Space") {
+    event.preventDefault();
+    renderSuggestPanel(true);
+    return;
+  }
+  if (event.key === "Escape") {
+    suggestPanel.hidden = true;
+  }
+});
+
+sqlEditor.addEventListener("click", () => renderSuggestPanel(false));
+sqlEditor.addEventListener("blur", () => {
+  setTimeout(() => {
+    suggestPanel.hidden = true;
+  }, 120);
+});
+
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 });
 
 runBtn.addEventListener("click", runSql);
@@ -608,19 +895,22 @@ builderTable.addEventListener("change", () => {
 });
 applyGeneratedBtn.addEventListener("click", () => {
   sqlEditor.value = generatedSql.value;
-  updateLineNumbers();
+  updateEditorVisuals();
   sqlEditor.focus();
 });
 runGeneratedBtn.addEventListener("click", async () => {
   sqlEditor.value = generatedSql.value;
-  updateLineNumbers();
+  updateEditorVisuals();
   await runSql();
 });
 copyBtn.addEventListener("click", async () => {
   await navigator.clipboard.writeText(sqlEditor.value);
+  const label = copyBtn.querySelector("span");
+  if (label) label.textContent = "已复制";
   copyBtn.title = "已复制";
   setTimeout(() => {
     copyBtn.title = "复制 SQL";
+    if (label) label.textContent = "复制";
   }, 1200);
 });
 

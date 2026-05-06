@@ -8,7 +8,15 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      const savedTheme = localStorage.getItem("mysql-simulator-theme");
+      if (savedTheme) {
+        document.documentElement.dataset.theme = savedTheme;
+      } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="console-page">
@@ -20,42 +28,59 @@
         </a>
         <div class="nav-links">
           <a href="/">介绍</a>
-          <a href="#visual">可视化</a>
-          <a href="#results">结果</a>
+          <a href="#visual">可视化转 SQL</a>
+          <a href="#results">执行结果</a>
         </div>
-        <a class="nav-action" href="/">
-          返回首页
-          <i data-lucide="arrow-right"></i>
-        </a>
+        <div class="nav-tools">
+          <button id="themeToggle" class="nav-tool-button" type="button" aria-label="切换深色模式">
+            <i data-lucide="moon"></i>
+            <span>深色模式</span>
+          </button>
+          <a class="nav-action" href="/">
+            返回首页
+            <i data-lucide="arrow-right"></i>
+          </a>
+        </div>
       </div>
     </nav>
 
-    <main>
-      <section id="simulator" class="section simulator-section console-section">
+    <main class="console-app">
+      <section id="simulator" class="console-workbench">
         <div class="container simulator-container">
-          <div class="section-heading">
-            <p class="eyebrow">INTERACTIVE IDE</p>
-            <h2>MySQL 模拟操作台</h2>
-            <p>写 SQL、看结果、浏览表数据，也可以用表单反向生成 SQL。</p>
+          <div class="console-titlebar">
+            <div>
+              <p class="eyebrow">SQL WORKBENCH</p>
+              <h1>MySQL 操作台</h1>
+            </div>
+            <div class="title-meta">
+              <span><i data-lucide="keyboard"></i> Ctrl / Cmd + Enter 执行</span>
+              <span><i data-lucide="shield-check"></i> 本地模拟状态</span>
+            </div>
           </div>
 
           <div class="ide-shell">
             <aside class="ide-sidebar">
-              <div class="panel-title">
-                <i data-lucide="database"></i>
-                数据库
-              </div>
-              <div id="schemaTree" class="schema-tree"></div>
-              <div class="panel-title examples-title">
-                <i data-lucide="book-open"></i>
-                示例
-              </div>
-              <div id="exampleList" class="example-list"></div>
-              <div class="panel-title examples-title">
-                <i data-lucide="terminal"></i>
-                日志
-              </div>
-              <div id="consoleLog" class="console-log"></div>
+              <section class="side-section">
+                <div class="panel-title">
+                  <i data-lucide="database"></i>
+                  数据库
+                </div>
+                <div id="schemaTree" class="schema-tree"></div>
+              </section>
+              <section class="side-section compact-section">
+                <div class="panel-title">
+                  <i data-lucide="book-open"></i>
+                  示例 SQL
+                </div>
+                <div id="exampleList" class="example-list"></div>
+              </section>
+              <section class="side-section compact-section">
+                <div class="panel-title">
+                  <i data-lucide="terminal"></i>
+                  执行日志
+                </div>
+                <div id="consoleLog" class="console-log"></div>
+              </section>
             </aside>
 
             <section class="ide-main" aria-label="SQL 编辑器">
@@ -65,41 +90,109 @@
                   <span id="currentDb">shop_demo</span>
                 </div>
                 <div class="toolbar-actions">
-                  <button id="formatBtn" class="icon-button" type="button" title="整理 SQL">
+                  <div class="tool-group">
+                  <button id="formatBtn" class="tool-button" type="button" title="整理 SQL">
                     <i data-lucide="align-left"></i>
+                    <span>格式化</span>
                   </button>
-                  <button id="copyBtn" class="icon-button" type="button" title="复制 SQL">
+                  <button id="copyBtn" class="tool-button" type="button" title="复制 SQL">
                     <i data-lucide="copy"></i>
+                    <span>复制</span>
                   </button>
-                  <button id="resetBtn" class="icon-button" type="button" title="重置数据">
+                  <button id="resetBtn" class="tool-button danger" type="button" title="重置模拟数据">
                     <i data-lucide="rotate-ccw"></i>
+                    <span>重置数据</span>
                   </button>
-                  <button id="importSqlmBtn" class="icon-button" type="button" title="上传 sqlm">
+                  </div>
+                  <div class="tool-group">
+                  <button id="importSqlmBtn" class="tool-button" type="button" title="上传加密 sqlm 文件">
                     <i data-lucide="upload"></i>
+                    <span>导入 .sqlm</span>
                   </button>
-                  <button id="exportSqlmBtn" class="icon-button" type="button" title="下载 sqlm">
+                  <button id="exportSqlmBtn" class="tool-button" type="button" title="下载加密 sqlm 文件">
                     <i data-lucide="download"></i>
+                    <span>导出 .sqlm</span>
                   </button>
-                  <button id="loadVisualBtn" class="icon-button" type="button" title="查看当前表">
+                  <button id="loadVisualBtn" class="tool-button" type="button" title="刷新当前可视化表">
                     <i data-lucide="panel-bottom-open"></i>
+                    <span>载入当前表</span>
                   </button>
+                  </div>
                   <button id="runBtn" class="run-button" type="button">
                     <i data-lucide="play"></i>
-                    运行
+                    <span>执行 SQL</span>
+                    <small>Ctrl Enter</small>
                   </button>
                   <input id="sqlmFileInput" type="file" accept=".sqlm" hidden />
                 </div>
               </div>
 
-              <div class="workspace-grid">
-                <div class="editor-card">
+              <div class="editor-card">
+                <div class="editor-header">
+                  <div>
+                    <strong>SQL 编辑器</strong>
+                    <span>支持多语句执行、事务和表结构模拟</span>
+                  </div>
+                  <span id="suggestStatus">输入 SQL 获取提示</span>
+                </div>
                   <div class="editor-wrap">
                     <div class="line-numbers" id="lineNumbers">1</div>
-                    <textarea id="sqlEditor" spellcheck="false" aria-label="SQL 编辑器"></textarea>
+                  <div class="editor-stack">
+                    <pre id="highlightLayer" aria-hidden="true"><code id="highlightCode"></code></pre>
+                    <textarea id="sqlEditor" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="SQL 编辑器"></textarea>
+                    <div id="suggestPanel" class="suggest-panel" hidden></div>
+                  </div>
                   </div>
                 </div>
 
-                <aside id="visual" class="builder-panel" aria-label="可视化转 SQL">
+              <div class="output-grid">
+                <section id="results" class="result-wrap primary-result" aria-label="结果展示">
+                  <div class="result-header">
+                    <div>
+                      <i data-lucide="table-2"></i>
+                      执行结果
+                    </div>
+                    <div class="result-state">
+                      <span id="resultState" class="status-badge idle">等待执行</span>
+                      <span id="elapsedTime">未运行</span>
+                    </div>
+                  </div>
+                  <div id="resultSummary" class="result-summary"></div>
+                  <div id="resultTabs" class="result-tabs"></div>
+                  <div id="resultPanel" class="result-panel"></div>
+                </section>
+
+                <section class="visual-table-panel" aria-label="可视化表">
+                  <div class="result-header">
+                    <div>
+                      <i data-lucide="table-properties"></i>
+                      可视化表
+                    </div>
+                    <div class="visual-controls">
+                      <select id="visualTableSelect"></select>
+                      <button id="refreshTableBtn" class="tool-button compact" type="button" title="刷新表">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>刷新</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="visualTableMeta" class="result-summary"></div>
+                  <div id="visualTablePanel" class="result-panel visual-table-body"></div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="inspector">
+              <section class="assist-card">
+                <div class="panel-title">
+                  <i data-lucide="sparkles"></i>
+                  代码提示
+                </div>
+                <p class="assist-copy">点击提示可插入到光标位置，Ctrl / Cmd + Space 可展开匹配建议。</p>
+                <div id="suggestionList" class="suggestion-list"></div>
+              </section>
+
+              <section id="visual" class="builder-panel" aria-label="可视化转 SQL">
                   <div class="panel-title">
                     <i data-lucide="wand-2"></i>
                     可视化转 SQL
@@ -184,47 +277,13 @@
                     </button>
                     <button id="runGeneratedBtn" class="primary-small" type="button">
                       <i data-lucide="play"></i>
-                      运行生成 SQL
+                      执行生成语句
                     </button>
                   </div>
-                </aside>
-              </div>
+              </section>
 
-              <div class="output-grid">
-                <section class="visual-table-panel" aria-label="可视化表">
-                  <div class="result-header">
-                    <div>
-                      <i data-lucide="table-properties"></i>
-                      可视化表
-                    </div>
-                    <div class="visual-controls">
-                      <select id="visualTableSelect"></select>
-                      <button id="refreshTableBtn" class="icon-button compact" type="button" title="刷新表">
-                        <i data-lucide="refresh-cw"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div id="visualTableMeta" class="result-summary"></div>
-                  <div id="visualTablePanel" class="result-panel visual-table-body"></div>
-                </section>
-
-                <section id="results" class="result-wrap" aria-label="结果展示">
-                  <div class="result-header">
-                    <div>
-                      <i data-lucide="table-2"></i>
-                      结果展示
-                    </div>
-                    <span id="elapsedTime">未运行</span>
-                  </div>
-                  <div id="resultSummary" class="result-summary"></div>
-                  <div id="resultTabs" class="result-tabs"></div>
-                  <div id="resultPanel" class="result-panel"></div>
-                </section>
-              </div>
-            </section>
-
-            <aside class="inspector">
-              <div class="panel-title">
+              <section class="assist-card support-card">
+                <div class="panel-title">
                 <i data-lucide="list-checks"></i>
                 支持指令
               </div>
@@ -235,11 +294,7 @@
                 <li>BEGIN / COMMIT / ROLLBACK</li>
                 <li>SET / HELP / 常用管理指令模拟</li>
               </ul>
-              <div class="panel-title command-title">
-                <i data-lucide="sparkles"></i>
-                工作台
-              </div>
-              <p class="inspector-copy">选择左侧表名可直接查看数据。右侧表单会同步字段，用来生成查询、新增、更新或删除 SQL。</p>
+              </section>
             </aside>
           </div>
         </div>
