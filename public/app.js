@@ -17,14 +17,18 @@ const settingsToggle = document.querySelector("#settingsToggle");
 const settingsPanel = document.querySelector("#settingsPanel");
 const settingsClose = document.querySelector("#settingsClose");
 const consoleModeSelect = document.querySelector("#consoleModeSelect");
+const databaseAppSelect = document.querySelector("#databaseAppSelect");
 const showVisualDataToggle = document.querySelector("#showVisualDataToggle");
 const showVisualBuilderToggle = document.querySelector("#showVisualBuilderToggle");
+const databaseAppBadge = document.querySelector("#databaseAppBadge");
 const modeBadge = document.querySelector("#modeBadge");
 const editorModeTitle = document.querySelector("#editorModeTitle");
 const editorModeHelp = document.querySelector("#editorModeHelp");
 const onboardingOverlay = document.querySelector("#onboardingOverlay");
 const onboardingClose = document.querySelector("#onboardingClose");
 const onboardingAccept = document.querySelector("#onboardingAccept");
+const navicatHostLabel = document.querySelector("#navicatHostLabel");
+const navicatAppLabel = document.querySelector("#navicatAppLabel");
 const navicatDbLabel = document.querySelector("#navicatDbLabel");
 const navicatTableLabel = document.querySelector("#navicatTableLabel");
 const navicatBuilderBtn = document.querySelector("#navicatBuilderBtn");
@@ -62,9 +66,49 @@ const ONBOARDING_KEY = "sqlsimulator-control-onboarding-seen-v1";
 const ONBOARDING_COOKIE = "sqlsimulator_control_onboarding_seen";
 
 const defaultConsolePrefs = {
+  databaseApp: "mysql",
   mode: "sql",
   showVisualData: true,
   showVisualBuilder: false
+};
+
+const databaseAppConfigs = {
+  mysql: {
+    label: "MySQL",
+    dialect: "MySQL 8.x 兼容",
+    host: "localhost:3306",
+    icon: "database-zap"
+  },
+  postgresql: {
+    label: "PostgreSQL",
+    dialect: "PostgreSQL 学习兼容",
+    host: "localhost:5432",
+    icon: "database"
+  },
+  sqlite: {
+    label: "SQLite",
+    dialect: "SQLite 本地文件兼容",
+    host: "local:/demo.sqlite",
+    icon: "hard-drive"
+  },
+  mariadb: {
+    label: "MariaDB",
+    dialect: "MariaDB 兼容",
+    host: "localhost:3307",
+    icon: "database"
+  },
+  sqlserver: {
+    label: "SQL Server",
+    dialect: "T-SQL 学习兼容",
+    host: "localhost:1433",
+    icon: "server"
+  },
+  oracle: {
+    label: "Oracle",
+    dialect: "Oracle SQL 学习兼容",
+    host: "localhost:1521/XEPDB1",
+    icon: "database"
+  }
 };
 
 const modeConfigs = {
@@ -202,9 +246,11 @@ function loadConsolePrefs() {
   try {
     const stored = JSON.parse(localStorage.getItem(CONSOLE_PREFS_KEY) || "{}");
     const mode = modeConfigs[stored.mode] ? stored.mode : defaultConsolePrefs.mode;
+    const databaseApp = databaseAppConfigs[stored.databaseApp] ? stored.databaseApp : defaultConsolePrefs.databaseApp;
     return {
       ...defaultConsolePrefs,
       ...stored,
+      databaseApp,
       mode,
       showVisualData: typeof stored.showVisualData === "boolean" ? stored.showVisualData : defaultConsolePrefs.showVisualData,
       showVisualBuilder: typeof stored.showVisualBuilder === "boolean" ? stored.showVisualBuilder : defaultConsolePrefs.showVisualBuilder
@@ -226,6 +272,10 @@ function getModeConfig() {
   return modeConfigs[consolePrefs.mode] || modeConfigs.sql;
 }
 
+function getDatabaseAppConfig() {
+  return databaseAppConfigs[consolePrefs.databaseApp] || databaseAppConfigs.mysql;
+}
+
 function renderRunButton(isRunning = false) {
   if (isRunning) {
     runBtn.innerHTML = '<i data-lucide="loader-circle"></i><span>执行中</span><small>请稍候</small>';
@@ -239,16 +289,21 @@ function renderRunButton(isRunning = false) {
 
 function applyConsolePrefs({ persist = false } = {}) {
   const config = getModeConfig();
+  const databaseApp = getDatabaseAppConfig();
   document.body.dataset.consoleMode = consolePrefs.mode;
+  document.body.dataset.databaseApp = consolePrefs.databaseApp;
   document.body.classList.toggle("hide-inspector", !consolePrefs.showVisualBuilder);
   document.body.classList.toggle("hide-visual-data", !consolePrefs.showVisualData);
 
+  databaseAppSelect.value = consolePrefs.databaseApp;
   consoleModeSelect.value = consolePrefs.mode;
   showVisualDataToggle.checked = consolePrefs.showVisualData;
   showVisualBuilderToggle.checked = consolePrefs.showVisualBuilder;
+  databaseAppBadge.innerHTML = `<i data-lucide="${databaseApp.icon}"></i> ${escapeHtml(databaseApp.label)}`;
   modeBadge.innerHTML = `<i data-lucide="${config.icon}"></i> ${escapeHtml(config.label)}`;
   editorModeTitle.textContent = config.title;
-  editorModeHelp.textContent = config.help;
+  editorModeHelp.textContent = `${config.help} · ${databaseApp.dialect}`;
+  updateNavicatLabels();
 
   if (!runBtn.disabled) {
     renderRunButton(false);
@@ -261,6 +316,9 @@ function applyConsolePrefs({ persist = false } = {}) {
 
 function updateNavicatLabels() {
   const table = getSelectedTable();
+  const databaseApp = getDatabaseAppConfig();
+  navicatHostLabel.textContent = databaseApp.host;
+  navicatAppLabel.textContent = databaseApp.label;
   navicatDbLabel.textContent = selectedVisualTable.database || schemaState?.currentDatabase || "demo";
   navicatTableLabel.textContent = table ? `${table.name} · ${table.rowCount} rows` : selectedVisualTable.table || "未选择表";
 }
@@ -637,7 +695,8 @@ function renderSchema(schema) {
   if (!getSelectedTable()) {
     selectedVisualTable = getFirstTable(schema) || selectedVisualTable;
   }
-  currentDb.textContent = `${schema.currentDatabase || "未选择数据库"}${schema.transactionActive ? " · transaction" : ""}`;
+  const databaseApp = getDatabaseAppConfig();
+  currentDb.textContent = `${databaseApp.label} · ${schema.currentDatabase || "未选择数据库"}${schema.transactionActive ? " · transaction" : ""}`;
   schemaTree.innerHTML = schema.databases.map((database) => `
     <div class="schema-db">
       <div class="schema-db-name">
@@ -1104,6 +1163,14 @@ settingsPanel.addEventListener("click", (event) => {
 });
 settingsClose.addEventListener("click", () => setSettingsOpen(false));
 consoleModeSelect.addEventListener("change", () => setConsolePref("mode", consoleModeSelect.value));
+databaseAppSelect.addEventListener("change", () => {
+  setConsolePref("databaseApp", databaseAppSelect.value);
+  const databaseApp = getDatabaseAppConfig();
+  if (schemaState) {
+    currentDb.textContent = `${databaseApp.label} · ${schemaState.currentDatabase || "未选择数据库"}${schemaState.transactionActive ? " · transaction" : ""}`;
+  }
+  addSystemLog("已切换数据库应用", `${databaseApp.label} · ${databaseApp.dialect}`);
+});
 showVisualDataToggle.addEventListener("change", () => setConsolePref("showVisualData", showVisualDataToggle.checked));
 showVisualBuilderToggle.addEventListener("change", () => setConsolePref("showVisualBuilder", showVisualBuilderToggle.checked));
 navicatBuilderBtn.addEventListener("click", () => {

@@ -56,6 +56,17 @@
                   <option value="terminal">Terminal 模式</option>
                 </select>
               </label>
+              <label class="settings-field">
+                数据库应用
+                <select id="databaseAppSelect">
+                  <option value="mysql">MySQL</option>
+                  <option value="postgresql">PostgreSQL</option>
+                  <option value="sqlite">SQLite</option>
+                  <option value="mariadb">MariaDB</option>
+                  <option value="sqlserver">SQL Server</option>
+                  <option value="oracle">Oracle</option>
+                </select>
+              </label>
               <label class="switch-row">
                 <span>
                   <strong>显示可视化数据</strong>
@@ -89,6 +100,7 @@
               <h1>SQLSimulator 操作台</h1>
             </div>
             <div class="title-meta">
+              <span id="databaseAppBadge"><i data-lucide="database-zap"></i> MySQL</span>
               <span id="modeBadge"><i data-lucide="panel-top"></i> 普通 SQL 语句模式</span>
               <span><i data-lucide="keyboard"></i> Ctrl / Cmd + Enter 执行</span>
               <span><i data-lucide="shield-check"></i> 本地模拟状态</span>
@@ -143,7 +155,8 @@
                   </button>
                 </div>
                 <div class="navicat-object-bar">
-                  <span><i data-lucide="server"></i> localhost:3306</span>
+                  <span><i data-lucide="server"></i> <b id="navicatHostLabel">localhost:3306</b></span>
+                  <span><i data-lucide="database-zap"></i> <b id="navicatAppLabel">MySQL</b></span>
                   <span><i data-lucide="database"></i> <b id="navicatDbLabel">demo</b></span>
                   <span><i data-lucide="table"></i> <b id="navicatTableLabel">orders</b></span>
                   <button id="navicatBuilderBtn" class="tool-button compact" type="button">
