@@ -1,7 +1,9 @@
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { exec } = require("child_process");
 const { performance } = require("perf_hooks");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -14,6 +16,13 @@ const SQLM_KEY = crypto
   .createHash("sha256")
   .update(process.env.SQLM_SECRET || "mysql-simulator-local-sqlm-key-v1")
   .digest();
+const SESSION_STATE_VERSION = 1;
+const APP_REPO = process.env.APP_REPO || "SummerXDsss/MySQLSimulator";
+const APP_UPDATE_BRANCH = process.env.APP_UPDATE_BRANCH || "main";
+const APP_DIR = __dirname;
+const WEB_UPDATE_ENABLED = process.env.WEB_UPDATE_ENABLED === "true";
+const WEB_UPDATE_RESTART = process.env.WEB_UPDATE_RESTART === "true";
+const VERSION_CACHE_MS = 60 * 1000;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -194,6 +203,55 @@ function createInitialState() {
 }
 
 let state = createInitialState();
+let versionCache = null;
+
+function getStateSnapshot() {
+  return clone({
+    currentDatabase: state.currentDatabase,
+    transactionSnapshot: state.transactionSnapshot,
+    variables: state.variables,
+    databases: state.databases
+  });
+}
+
+function createClientStatePayload() {
+  return {
+    version: SESSION_STATE_VERSION,
+    savedAt: new Date().toISOString(),
+    state: getStateSnapshot()
+  };
+}
+
+function unwrapClientState(payload) {
+  const clientState = payload?.clientState || payload?.browserState || payload?.sessionState || null;
+  if (!clientState) return null;
+  return clientState.state || clientState;
+}
+
+function normalizeRuntimeState(runtimeState) {
+  if (!runtimeState) return createInitialState();
+  const normalized = validateImportedState(runtimeState);
+  if (runtimeState.transactionSnapshot && typeof runtimeState.transactionSnapshot === "object") {
+    try {
+      normalized.transactionSnapshot = validateImportedState(runtimeState.transactionSnapshot);
+    } catch {
+      normalized.transactionSnapshot = null;
+    }
+  }
+  return normalized;
+}
+
+function loadRequestState(payload) {
+  state = normalizeRuntimeState(unwrapClientState(payload));
+}
+
+function stateResponse(data = {}) {
+  return {
+    ...data,
+    schema: getSchemaSummary(),
+    clientState: createClientStatePayload()
+  };
+}
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -341,6 +399,163 @@ function serveStatic(request, response) {
       "cache-control": "no-store"
     });
     response.end(content);
+  });
+}
+
+function readPackageVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8"));
+    return pkg.version || "0.0.0";
+  } catch {
+    return process.env.APP_VERSION || "0.0.0";
+  }
+}
+
+function readCurrentRevision() {
+  const revisionFile = path.join(APP_DIR, ".current-revision");
+  try {
+    const revision = fs.readFileSync(revisionFile, "utf8").trim();
+    if (revision) return revision;
+  } catch {
+    // ignore missing revision file
+  }
+  if (process.env.APP_REVISION) return process.env.APP_REVISION;
+  return "local";
+}
+
+function requestJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        "accept": "application/vnd.github+json",
+        "user-agent": "mysql-simulator-version-check"
+      }
+    }, (incoming) => {
+      let body = "";
+      incoming.on("data", (chunk) => {
+        body += chunk;
+      });
+      incoming.on("end", () => {
+        if (incoming.statusCode < 200 || incoming.statusCode >= 300) {
+          reject(new Error(`Version request failed: ${incoming.statusCode}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.setTimeout(8000, () => {
+      request.destroy(new Error("Version request timeout"));
+    });
+    request.on("error", reject);
+  });
+}
+
+function requestText(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        "user-agent": "mysql-simulator-version-check"
+      }
+    }, (incoming) => {
+      let body = "";
+      incoming.on("data", (chunk) => {
+        body += chunk;
+      });
+      incoming.on("end", () => {
+        if (incoming.statusCode < 200 || incoming.statusCode >= 300) {
+          reject(new Error(`Version request failed: ${incoming.statusCode}`));
+          return;
+        }
+        resolve(body);
+      });
+    });
+    request.setTimeout(8000, () => {
+      request.destroy(new Error("Version request timeout"));
+    });
+    request.on("error", reject);
+  });
+}
+
+async function getLatestVersionInfo(force = false) {
+  const now = Date.now();
+  if (!force && versionCache && now - versionCache.checkedAt < VERSION_CACHE_MS) {
+    return versionCache.payload;
+  }
+
+  const currentVersion = readPackageVersion();
+  const currentRevision = readCurrentRevision();
+  const payload = {
+    ok: true,
+    repo: APP_REPO,
+    branch: APP_UPDATE_BRANCH,
+    currentVersion,
+    currentRevision,
+    latestVersion: null,
+    latestRevision: null,
+    checkedAt: new Date().toISOString(),
+    updateAvailable: false,
+    updateEnabled: WEB_UPDATE_ENABLED,
+    message: "已是最新版本"
+  };
+
+  try {
+    const [commit, packageText] = await Promise.all([
+      requestJson(`https://api.github.com/repos/${APP_REPO}/commits/${APP_UPDATE_BRANCH}`),
+      requestText(`https://raw.githubusercontent.com/${APP_REPO}/${APP_UPDATE_BRANCH}/package.json`)
+    ]);
+    const latestPackage = JSON.parse(packageText);
+    payload.latestRevision = commit.sha || null;
+    payload.latestVersion = latestPackage.version || null;
+    payload.updateAvailable = Boolean(
+      payload.latestRevision
+      && currentRevision !== "local"
+      && !payload.latestRevision.startsWith(currentRevision)
+    );
+    payload.message = payload.updateAvailable ? "发现新版本" : "已是最新版本";
+  } catch (error) {
+    payload.ok = false;
+    payload.message = "暂时无法检查最新版本";
+    payload.detail = error.message;
+  }
+
+  versionCache = { checkedAt: now, payload };
+  return payload;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function runWebUpdate(latestRevision) {
+  const archiveUrl = `https://github.com/${APP_REPO}/archive/${latestRevision}.tar.gz`;
+  const quotedAppDir = shellQuote(APP_DIR);
+  const quotedArchiveUrl = shellQuote(archiveUrl);
+  const quotedRevision = shellQuote(latestRevision);
+  const command = [
+    "set -e",
+    "tmp=$(mktemp -d)",
+    `wget -qO \"$tmp/source.tar.gz\" ${quotedArchiveUrl}`,
+    "tar -xzf \"$tmp/source.tar.gz\" -C \"$tmp\"",
+    "src=$(find \"$tmp\" -mindepth 1 -maxdepth 1 -type d | head -n 1)",
+    `cp \"$src/package.json\" \"$src/server.js\" ${quotedAppDir}/`,
+    `rm -rf ${quotedAppDir}/public`,
+    `cp -R \"$src/public\" ${quotedAppDir}/public`,
+    `printf %s ${quotedRevision} > ${quotedAppDir}/.current-revision`,
+    "rm -rf \"$tmp\""
+  ].join(" && ");
+
+  return new Promise((resolve, reject) => {
+    exec(command, { cwd: APP_DIR, timeout: 120000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr || error.message));
+        return;
+      }
+      resolve(stdout);
+    });
   });
 }
 
@@ -1260,13 +1475,65 @@ function getSchemaSummary() {
 }
 
 async function handleApi(request, response, pathname) {
+  if (request.method === "GET" && pathname === "/api/version") {
+    jsonResponse(response, 200, await getLatestVersionInfo());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/update") {
+    try {
+      if (!WEB_UPDATE_ENABLED) {
+        jsonResponse(response, 400, {
+          ok: false,
+          message: "服务器未开启网页更新"
+        });
+        return;
+      }
+      const version = await getLatestVersionInfo(true);
+      if (!version.updateAvailable || !version.latestRevision) {
+        jsonResponse(response, 200, {
+          ok: true,
+          message: version.message || "已是最新版本",
+          version
+        });
+        return;
+      }
+      await runWebUpdate(version.latestRevision);
+      versionCache = null;
+      jsonResponse(response, 200, {
+        ok: true,
+        message: WEB_UPDATE_RESTART ? "更新完成，服务正在重启" : "更新完成，刷新页面后生效",
+        version: await getLatestVersionInfo(true)
+      });
+      if (WEB_UPDATE_RESTART) {
+        setTimeout(() => process.exit(0), 500);
+      }
+    } catch (error) {
+      jsonResponse(response, 500, { ok: false, message: error.message });
+    }
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/state") {
-    jsonResponse(response, 200, getSchemaSummary());
+    state = createInitialState();
+    jsonResponse(response, 200, stateResponse());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/state") {
+    try {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      loadRequestState(payload);
+      jsonResponse(response, 200, stateResponse());
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message });
+    }
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/table") {
     try {
+      state = createInitialState();
       const url = new URL(request.url, `http://${request.headers.host}`);
       const databaseName = url.searchParams.get("database") || state.currentDatabase;
       const tableName = url.searchParams.get("table");
@@ -1285,14 +1552,49 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/table") {
+    try {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      loadRequestState(payload);
+      const databaseName = payload.database || state.currentDatabase;
+      const tableName = payload.table;
+      if (!tableName) throw new SqlError("Table name is required");
+      const { database, table } = getTableFromDatabase(databaseName, tableName);
+      jsonResponse(response, 200, {
+        database: database.name,
+        table: table.name,
+        columns: clone(table.columns),
+        rows: clone(table.rows),
+        rowCount: table.rows.length,
+        clientState: createClientStatePayload()
+      });
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message });
+    }
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/examples") {
     jsonResponse(response, 200, { examples });
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/sqlm/export") {
+    state = createInitialState();
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
     downloadResponse(response, `mysql-simulator-${stamp}.sqlm`, encryptSqlm(createSqlmPayload()));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/sqlm/export") {
+    try {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      loadRequestState(payload);
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+      downloadResponse(response, `mysql-simulator-${stamp}.sqlm`, encryptSqlm(createSqlmPayload()));
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message });
+    }
     return;
   }
 
@@ -1301,12 +1603,11 @@ async function handleApi(request, response, pathname) {
       const payload = JSON.parse(await readBody(request) || "{}");
       const decrypted = decryptSqlm(payload.content);
       state = validateImportedState(decrypted.state);
-      jsonResponse(response, 200, {
+      jsonResponse(response, 200, stateResponse({
         ok: true,
         message: ".sqlm 文件已解密并导入",
-        exportedAt: decrypted.exportedAt || null,
-        schema: getSchemaSummary()
-      });
+        exportedAt: decrypted.exportedAt || null
+      }));
     } catch (error) {
       jsonResponse(response, 400, { ok: false, message: error.message });
     }
@@ -1338,8 +1639,9 @@ async function handleApi(request, response, pathname) {
   if (request.method === "POST" && pathname === "/api/query") {
     try {
       const payload = JSON.parse(await readBody(request) || "{}");
+      loadRequestState(payload);
       const result = executeSql(String(payload.sql || ""));
-      jsonResponse(response, 200, { ...result, schema: getSchemaSummary() });
+      jsonResponse(response, 200, stateResponse(result));
     } catch (error) {
       jsonResponse(response, 400, { ok: false, message: error.message });
     }
@@ -1348,7 +1650,7 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/reset") {
     state = createInitialState();
-    jsonResponse(response, 200, { ok: true, schema: getSchemaSummary() });
+    jsonResponse(response, 200, stateResponse({ ok: true }));
     return;
   }
 

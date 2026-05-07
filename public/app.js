@@ -41,6 +41,7 @@ const builderLimit = document.querySelector("#builderLimit");
 const generatedSql = document.querySelector("#generatedSql");
 const applyGeneratedBtn = document.querySelector("#applyGeneratedBtn");
 const runGeneratedBtn = document.querySelector("#runGeneratedBtn");
+const CLIENT_STATE_KEY = "mysql-simulator-client-state-v1";
 
 let results = [];
 let activeResultIndex = 0;
@@ -415,6 +416,45 @@ async function fetchJson(url, options = {}) {
   return payload;
 }
 
+function loadClientState() {
+  try {
+    const stored = localStorage.getItem(CLIENT_STATE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveClientState(payload) {
+  if (!payload?.clientState) return;
+  try {
+    localStorage.setItem(CLIENT_STATE_KEY, JSON.stringify(payload.clientState));
+  } catch {
+    addSystemLog("本地保存失败", "浏览器空间不足，模拟数据可能不会保留", false);
+  }
+}
+
+async function fetchSimulatorJson(url, data = {}) {
+  const payload = await fetchJson(url, {
+    method: "POST",
+    body: JSON.stringify({
+      ...data,
+      clientState: loadClientState()
+    })
+  });
+  saveClientState(payload);
+  return payload;
+}
+
+async function fetchInitialState() {
+  try {
+    return await fetchSimulatorJson("/api/state");
+  } catch (error) {
+    localStorage.removeItem(CLIENT_STATE_KEY);
+    return fetchSimulatorJson("/api/state");
+  }
+}
+
 function renderSchema(schema) {
   schemaState = schema;
   if (!getSelectedTable()) {
@@ -614,7 +654,10 @@ function updateGeneratedSql() {
 
 async function loadVisualTable() {
   if (!selectedVisualTable.database || !selectedVisualTable.table) return;
-  const tableData = await fetchJson(`/api/table?database=${encodeURIComponent(selectedVisualTable.database)}&table=${encodeURIComponent(selectedVisualTable.table)}`);
+  const tableData = await fetchSimulatorJson("/api/table", {
+    database: selectedVisualTable.database,
+    table: selectedVisualTable.table
+  });
   visualTableMeta.innerHTML = `
     <span class="summary-pill"><strong>${escapeHtml(tableData.database)}.${escapeHtml(tableData.table)}</strong></span>
     <span class="summary-pill"><strong>${tableData.rowCount}</strong> 行</span>
@@ -742,9 +785,8 @@ async function runSql() {
   runBtn.innerHTML = '<i data-lucide="loader-circle"></i><span>执行中</span><small>请稍候</small>';
   iconRefresh();
   try {
-    const payload = await fetchJson("/api/query", {
-      method: "POST",
-      body: JSON.stringify({ sql: sqlEditor.value })
+    const payload = await fetchSimulatorJson("/api/query", {
+      sql: sqlEditor.value
     });
     results = payload.results || [];
     activeResultIndex = 0;
@@ -768,7 +810,7 @@ async function runSql() {
 }
 
 async function resetState() {
-  const payload = await fetchJson("/api/reset", { method: "POST", body: "{}" });
+  const payload = await fetchSimulatorJson("/api/reset");
   renderSchema(payload.schema);
   results = [];
   activeResultIndex = 0;
@@ -780,7 +822,11 @@ async function resetState() {
 }
 
 async function exportSqlm() {
-  const response = await fetch("/api/sqlm/export");
+  const response = await fetch("/api/sqlm/export", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ clientState: loadClientState() })
+  });
   if (!response.ok) throw new Error("下载 sqlm 失败");
   const blob = await response.blob();
   const disposition = response.headers.get("content-disposition") || "";
@@ -799,10 +845,7 @@ async function exportSqlm() {
 async function importSqlm(file) {
   if (!file) return;
   const content = await file.text();
-  const payload = await fetchJson("/api/sqlm/import", {
-    method: "POST",
-    body: JSON.stringify({ content })
-  });
+  const payload = await fetchSimulatorJson("/api/sqlm/import", { content });
   renderSchema(payload.schema);
   results = [];
   activeResultIndex = 0;
@@ -821,7 +864,7 @@ async function bootstrap() {
   renderResults();
 
   const [state, examplePayload] = await Promise.all([
-    fetchJson("/api/state"),
+    fetchInitialState(),
     fetchJson("/api/examples")
   ]);
   renderSchema(state);
