@@ -13,6 +13,21 @@ const copyBtn = document.querySelector("#copyBtn");
 const formatBtn = document.querySelector("#formatBtn");
 const loadVisualBtn = document.querySelector("#loadVisualBtn");
 const themeToggle = document.querySelector("#themeToggle");
+const settingsToggle = document.querySelector("#settingsToggle");
+const settingsPanel = document.querySelector("#settingsPanel");
+const settingsClose = document.querySelector("#settingsClose");
+const consoleModeSelect = document.querySelector("#consoleModeSelect");
+const showVisualDataToggle = document.querySelector("#showVisualDataToggle");
+const showVisualBuilderToggle = document.querySelector("#showVisualBuilderToggle");
+const modeBadge = document.querySelector("#modeBadge");
+const editorModeTitle = document.querySelector("#editorModeTitle");
+const editorModeHelp = document.querySelector("#editorModeHelp");
+const onboardingOverlay = document.querySelector("#onboardingOverlay");
+const onboardingClose = document.querySelector("#onboardingClose");
+const onboardingAccept = document.querySelector("#onboardingAccept");
+const navicatDbLabel = document.querySelector("#navicatDbLabel");
+const navicatTableLabel = document.querySelector("#navicatTableLabel");
+const navicatBuilderBtn = document.querySelector("#navicatBuilderBtn");
 const currentDb = document.querySelector("#currentDb");
 const schemaTree = document.querySelector("#schemaTree");
 const exampleList = document.querySelector("#exampleList");
@@ -42,13 +57,50 @@ const generatedSql = document.querySelector("#generatedSql");
 const applyGeneratedBtn = document.querySelector("#applyGeneratedBtn");
 const runGeneratedBtn = document.querySelector("#runGeneratedBtn");
 const CLIENT_STATE_KEY = "mysql-simulator-client-state-v1";
+const CONSOLE_PREFS_KEY = "sqlsimulator-console-preferences-v1";
+const ONBOARDING_KEY = "sqlsimulator-control-onboarding-seen-v1";
+const ONBOARDING_COOKIE = "sqlsimulator_control_onboarding_seen";
+
+const defaultConsolePrefs = {
+  mode: "sql",
+  showVisualData: true,
+  showVisualBuilder: false
+};
+
+const modeConfigs = {
+  sql: {
+    label: "普通 SQL 语句模式",
+    title: "SQL 编辑器",
+    help: "支持多语句执行、事务和表结构模拟",
+    icon: "panel-top",
+    runLabel: "执行 SQL",
+    runHint: "Ctrl Enter"
+  },
+  navicat: {
+    label: "NaviCat UI 模拟模式",
+    title: "NaviCat 查询窗口",
+    help: "选择库表后运行查询，像数据库管理工具一样查看结果",
+    icon: "table-properties",
+    runLabel: "运行查询",
+    runHint: "Ctrl Enter"
+  },
+  terminal: {
+    label: "Terminal 模式",
+    title: "Terminal 命令行",
+    help: "输入 SQL、SHOW、USE、HELP 等指令并查看模拟响应",
+    icon: "terminal",
+    runLabel: "执行命令",
+    runHint: "Enter"
+  }
+};
 
 let results = [];
 let activeResultIndex = 0;
 let schemaState = null;
-let selectedVisualTable = { database: "shop_demo", table: "orders" };
+let selectedVisualTable = { database: "demo", table: "orders" };
 let editorSuggestions = [];
 let sidebarSuggestions = [];
+let consolePrefs = loadConsolePrefs();
 
 const defaultSql = `SELECT VERSION();
 SELECT DATABASE();
@@ -144,6 +196,129 @@ function applyTheme(theme) {
 function initTheme() {
   const activeTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   applyTheme(activeTheme);
+}
+
+function loadConsolePrefs() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CONSOLE_PREFS_KEY) || "{}");
+    const mode = modeConfigs[stored.mode] ? stored.mode : defaultConsolePrefs.mode;
+    return {
+      ...defaultConsolePrefs,
+      ...stored,
+      mode,
+      showVisualData: typeof stored.showVisualData === "boolean" ? stored.showVisualData : defaultConsolePrefs.showVisualData,
+      showVisualBuilder: typeof stored.showVisualBuilder === "boolean" ? stored.showVisualBuilder : defaultConsolePrefs.showVisualBuilder
+    };
+  } catch {
+    return { ...defaultConsolePrefs };
+  }
+}
+
+function saveConsolePrefs() {
+  try {
+    localStorage.setItem(CONSOLE_PREFS_KEY, JSON.stringify(consolePrefs));
+  } catch {
+    // 设置保存失败不影响模拟器运行。
+  }
+}
+
+function getModeConfig() {
+  return modeConfigs[consolePrefs.mode] || modeConfigs.sql;
+}
+
+function renderRunButton(isRunning = false) {
+  if (isRunning) {
+    runBtn.innerHTML = '<i data-lucide="loader-circle"></i><span>执行中</span><small>请稍候</small>';
+    iconRefresh();
+    return;
+  }
+  const config = getModeConfig();
+  runBtn.innerHTML = `<i data-lucide="play"></i><span>${escapeHtml(config.runLabel)}</span><small>${escapeHtml(config.runHint)}</small>`;
+  iconRefresh();
+}
+
+function applyConsolePrefs({ persist = false } = {}) {
+  const config = getModeConfig();
+  document.body.dataset.consoleMode = consolePrefs.mode;
+  document.body.classList.toggle("hide-inspector", !consolePrefs.showVisualBuilder);
+  document.body.classList.toggle("hide-visual-data", !consolePrefs.showVisualData);
+
+  consoleModeSelect.value = consolePrefs.mode;
+  showVisualDataToggle.checked = consolePrefs.showVisualData;
+  showVisualBuilderToggle.checked = consolePrefs.showVisualBuilder;
+  modeBadge.innerHTML = `<i data-lucide="${config.icon}"></i> ${escapeHtml(config.label)}`;
+  editorModeTitle.textContent = config.title;
+  editorModeHelp.textContent = config.help;
+
+  if (!runBtn.disabled) {
+    renderRunButton(false);
+  }
+  if (persist) {
+    saveConsolePrefs();
+  }
+  iconRefresh();
+}
+
+function updateNavicatLabels() {
+  const table = getSelectedTable();
+  navicatDbLabel.textContent = selectedVisualTable.database || schemaState?.currentDatabase || "demo";
+  navicatTableLabel.textContent = table ? `${table.name} · ${table.rowCount} rows` : selectedVisualTable.table || "未选择表";
+}
+
+function setConsolePref(key, value) {
+  consolePrefs = {
+    ...consolePrefs,
+    [key]: value
+  };
+  applyConsolePrefs({ persist: true });
+  if (key === "showVisualData" && value) {
+    loadVisualTable().catch((error) => addSystemLog("可视化表刷新失败", error.message, false));
+  }
+}
+
+function setSettingsOpen(open) {
+  settingsPanel.hidden = !open;
+  settingsToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    consoleModeSelect.focus();
+  }
+}
+
+function hasSeenOnboarding() {
+  const cookieSeen = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .some((item) => item === `${ONBOARDING_COOKIE}=1`);
+  let localSeen = false;
+  try {
+    localSeen = localStorage.getItem(ONBOARDING_KEY) === "1";
+  } catch {
+    localSeen = false;
+  }
+  return localSeen || cookieSeen;
+}
+
+function markOnboardingSeen() {
+  try {
+    localStorage.setItem(ONBOARDING_KEY, "1");
+  } catch {
+    // cookie 会作为兜底标记。
+  }
+  document.cookie = `${ONBOARDING_COOKIE}=1; Max-Age=31536000; Path=/; SameSite=Lax`;
+}
+
+function closeOnboarding() {
+  onboardingOverlay.hidden = true;
+  markOnboardingSeen();
+}
+
+function initOnboarding() {
+  if (hasSeenOnboarding()) return;
+  window.setTimeout(() => {
+    onboardingOverlay.hidden = false;
+    onboardingAccept.focus();
+    iconRefresh();
+  }, 320);
 }
 
 function setResultState(state, label) {
@@ -448,10 +623,12 @@ async function fetchSimulatorJson(url, data = {}) {
 
 async function fetchInitialState() {
   try {
-    return await fetchSimulatorJson("/api/state");
+    const payload = await fetchSimulatorJson("/api/state");
+    return payload.schema || payload;
   } catch (error) {
     localStorage.removeItem(CLIENT_STATE_KEY);
-    return fetchSimulatorJson("/api/state");
+    const payload = await fetchSimulatorJson("/api/state");
+    return payload.schema || payload;
   }
 }
 
@@ -495,6 +672,7 @@ function renderSchema(schema) {
   renderVisualTableOptions();
   renderBuilderControls();
   renderSidebarSuggestions();
+  updateNavicatLabels();
 }
 
 function renderExamples(examples) {
@@ -653,6 +831,7 @@ function updateGeneratedSql() {
 }
 
 async function loadVisualTable() {
+  if (!consolePrefs.showVisualData) return;
   if (!selectedVisualTable.database || !selectedVisualTable.table) return;
   const tableData = await fetchSimulatorJson("/api/table", {
     database: selectedVisualTable.database,
@@ -782,8 +961,7 @@ async function runSql() {
   runBtn.disabled = true;
   setResultState("running", "执行中");
   elapsedTime.textContent = "运行中";
-  runBtn.innerHTML = '<i data-lucide="loader-circle"></i><span>执行中</span><small>请稍候</small>';
-  iconRefresh();
+  renderRunButton(true);
   try {
     const payload = await fetchSimulatorJson("/api/query", {
       sql: sqlEditor.value
@@ -804,8 +982,7 @@ async function runSql() {
     renderResults();
   } finally {
     runBtn.disabled = false;
-    runBtn.innerHTML = '<i data-lucide="play"></i><span>执行 SQL</span><small>Ctrl Enter</small>';
-    iconRefresh();
+    renderRunButton(false);
   }
 }
 
@@ -858,6 +1035,8 @@ async function importSqlm(file) {
 
 async function bootstrap() {
   initTheme();
+  applyConsolePrefs();
+  initOnboarding();
   sqlEditor.value = defaultSql;
   updateEditorVisuals();
   setResultState("idle", "等待执行");
@@ -869,7 +1048,9 @@ async function bootstrap() {
   ]);
   renderSchema(state);
   renderExamples(examplePayload.examples);
-  await loadVisualTable();
+  if (consolePrefs.showVisualData) {
+    await loadVisualTable();
+  }
   renderSuggestPanel(false);
   iconRefresh();
 }
@@ -883,6 +1064,11 @@ sqlEditor.addEventListener("scroll", () => {
 });
 
 sqlEditor.addEventListener("keydown", (event) => {
+  if (consolePrefs.mode === "terminal" && event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+    event.preventDefault();
+    runSql();
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     runSql();
@@ -908,6 +1094,39 @@ sqlEditor.addEventListener("blur", () => {
 themeToggle.addEventListener("click", () => {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 });
+
+settingsToggle.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setSettingsOpen(settingsPanel.hidden);
+});
+settingsPanel.addEventListener("click", (event) => {
+  event.stopPropagation();
+});
+settingsClose.addEventListener("click", () => setSettingsOpen(false));
+consoleModeSelect.addEventListener("change", () => setConsolePref("mode", consoleModeSelect.value));
+showVisualDataToggle.addEventListener("change", () => setConsolePref("showVisualData", showVisualDataToggle.checked));
+showVisualBuilderToggle.addEventListener("change", () => setConsolePref("showVisualBuilder", showVisualBuilderToggle.checked));
+navicatBuilderBtn.addEventListener("click", () => {
+  setConsolePref("mode", "navicat");
+  setConsolePref("showVisualBuilder", true);
+});
+document.addEventListener("click", () => {
+  if (!settingsPanel.hidden) {
+    setSettingsOpen(false);
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!settingsPanel.hidden) {
+      setSettingsOpen(false);
+    }
+    if (!onboardingOverlay.hidden) {
+      closeOnboarding();
+    }
+  }
+});
+onboardingClose.addEventListener("click", closeOnboarding);
+onboardingAccept.addEventListener("click", closeOnboarding);
 
 runBtn.addEventListener("click", runSql);
 resetBtn.addEventListener("click", resetState);

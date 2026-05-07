@@ -101,7 +101,7 @@ function createColumn(name, type, options = {}) {
 
 function createInitialState() {
   return {
-    currentDatabase: "shop_demo",
+    currentDatabase: "demo",
     transactionSnapshot: null,
     variables: {
       autocommit: "ON",
@@ -111,8 +111,8 @@ function createInitialState() {
       max_connections: "151"
     },
     databases: {
-      shop_demo: {
-        name: "shop_demo",
+      demo: {
+        name: "demo",
         tables: {
           customers: {
             name: "customers",
@@ -244,6 +244,14 @@ function unwrapClientState(payload) {
 function normalizeRuntimeState(runtimeState) {
   if (!runtimeState) return createInitialState();
   const normalized = validateImportedState(runtimeState);
+  if (!normalized.databases.demo) {
+    const demoSource = normalized.databases.shop_demo || createInitialState().databases.demo;
+    normalized.databases.demo = clone(demoSource);
+    normalized.databases.demo.name = "demo";
+  }
+  if (!normalized.currentDatabase || normalized.currentDatabase === "shop_demo") {
+    normalized.currentDatabase = "demo";
+  }
   if (runtimeState.transactionSnapshot && typeof runtimeState.transactionSnapshot === "object") {
     try {
       normalized.transactionSnapshot = validateImportedState(runtimeState.transactionSnapshot);
@@ -390,7 +398,11 @@ function readBody(request) {
 
 function serveStatic(request, response) {
   const requestedPath = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
-  const safePath = requestedPath === "/" ? "/index.html" : requestedPath;
+  const safePath = requestedPath === "/"
+    ? "/index.html"
+    : ["/control", "/control.html"].includes(requestedPath)
+      ? "/console.html"
+      : requestedPath;
   const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
 
   if (!filePath.startsWith(PUBLIC_DIR)) {

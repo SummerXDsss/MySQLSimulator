@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MySQL 操作台</title>
-    <meta name="description" content="MySQL 模拟器操作台，支持 SQL 执行、结果展示、可视化表和可视化转 SQL。" />
+    <title>SQL 操作台</title>
+    <meta name="description" content="SQLSimulator 操作台，支持 NaviCat UI 模拟、普通 SQL 和 Terminal 模式。" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,20 +22,56 @@
   <body class="console-page">
     <nav class="nav">
       <div class="container nav-inner">
-        <a class="brand" href="/" aria-label="MySQL 模拟器">
+        <a class="brand" href="/" aria-label="SQL 数据库模拟器">
           <span class="brand-mark">SQL</span>
-          <span>MySQL 操作台</span>
+          <span>SQL 操作台</span>
         </a>
         <div class="nav-links">
           <a href="/">介绍</a>
-          <a href="#visual">可视化转 SQL</a>
           <a href="#results">执行结果</a>
+          <a href="#visualTable">可视化数据</a>
         </div>
         <div class="nav-tools">
           <button id="themeToggle" class="nav-tool-button" type="button" aria-label="切换深色模式">
             <i data-lucide="moon"></i>
             <span>深色模式</span>
           </button>
+          <div class="settings-wrap">
+            <button id="settingsToggle" class="nav-tool-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPanel">
+              <i data-lucide="settings"></i>
+              <span>设置</span>
+            </button>
+            <div id="settingsPanel" class="settings-panel" role="dialog" aria-label="操作台设置" hidden>
+              <div class="settings-heading">
+                <strong>操作台设置</strong>
+                <button id="settingsClose" class="icon-button" type="button" aria-label="关闭设置">
+                  <i data-lucide="x"></i>
+                </button>
+              </div>
+              <label class="settings-field">
+                模式
+                <select id="consoleModeSelect">
+                  <option value="sql">普通 SQL 语句模式</option>
+                  <option value="navicat">NaviCat UI 模拟模式</option>
+                  <option value="terminal">Terminal 模式</option>
+                </select>
+              </label>
+              <label class="switch-row">
+                <span>
+                  <strong>显示可视化数据</strong>
+                  <small>结果区显示当前表数据</small>
+                </span>
+                <input id="showVisualDataToggle" type="checkbox" />
+              </label>
+              <label class="switch-row">
+                <span>
+                  <strong>显示可视化转 SQL</strong>
+                  <small>打开右侧生成 SQL 面板</small>
+                </span>
+                <input id="showVisualBuilderToggle" type="checkbox" />
+              </label>
+            </div>
+          </div>
           <a class="nav-action" href="/">
             返回首页
             <i data-lucide="arrow-right"></i>
@@ -50,9 +86,10 @@
           <div class="console-titlebar">
             <div>
               <p class="eyebrow">SQL WORKBENCH</p>
-              <h1>MySQL 操作台</h1>
+              <h1>SQLSimulator 操作台</h1>
             </div>
             <div class="title-meta">
+              <span id="modeBadge"><i data-lucide="panel-top"></i> 普通 SQL 语句模式</span>
               <span><i data-lucide="keyboard"></i> Ctrl / Cmd + Enter 执行</span>
               <span><i data-lucide="shield-check"></i> 本地模拟状态</span>
             </div>
@@ -84,10 +121,42 @@
             </aside>
 
             <section class="ide-main" aria-label="SQL 编辑器">
+              <div id="navicatChrome" class="navicat-chrome" aria-label="NaviCat UI 模拟区">
+                <div class="navicat-window-bar">
+                  <span class="navicat-dot red"></span>
+                  <span class="navicat-dot yellow"></span>
+                  <span class="navicat-dot green"></span>
+                  <strong>SQLSimulator Connection</strong>
+                </div>
+                <div class="navicat-tabs">
+                  <button class="navicat-tab active" type="button">
+                    <i data-lucide="file-code-2"></i>
+                    Query 1
+                  </button>
+                  <button class="navicat-tab" type="button">
+                    <i data-lucide="table-2"></i>
+                    Data Grid
+                  </button>
+                  <button class="navicat-tab" type="button">
+                    <i data-lucide="columns-3"></i>
+                    Structure
+                  </button>
+                </div>
+                <div class="navicat-object-bar">
+                  <span><i data-lucide="server"></i> localhost:3306</span>
+                  <span><i data-lucide="database"></i> <b id="navicatDbLabel">demo</b></span>
+                  <span><i data-lucide="table"></i> <b id="navicatTableLabel">orders</b></span>
+                  <button id="navicatBuilderBtn" class="tool-button compact" type="button">
+                    <i data-lucide="wand-2"></i>
+                    查询设计器
+                  </button>
+                </div>
+              </div>
+
               <div class="toolbar">
                 <div class="toolbar-left">
                   <span class="status-dot"></span>
-                  <span id="currentDb">shop_demo</span>
+                  <span id="currentDb">demo</span>
                 </div>
                 <div class="toolbar-actions">
                   <div class="tool-group">
@@ -130,8 +199,8 @@
               <div class="editor-card">
                 <div class="editor-header">
                   <div>
-                    <strong>SQL 编辑器</strong>
-                    <span>支持多语句执行、事务和表结构模拟</span>
+                    <strong id="editorModeTitle">SQL 编辑器</strong>
+                    <span id="editorModeHelp">支持多语句执行、事务和表结构模拟</span>
                   </div>
                   <span id="suggestStatus">输入 SQL 获取提示</span>
                 </div>
@@ -162,7 +231,7 @@
                   <div id="resultPanel" class="result-panel"></div>
                 </section>
 
-                <section class="visual-table-panel" aria-label="可视化表">
+                <section id="visualTable" class="visual-table-panel" aria-label="可视化表">
                   <div class="result-header">
                     <div>
                       <i data-lucide="table-properties"></i>
@@ -300,6 +369,42 @@
         </div>
       </section>
     </main>
+
+    <div id="onboardingOverlay" class="onboarding-overlay" hidden>
+      <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+        <button id="onboardingClose" class="icon-button onboarding-close" type="button" aria-label="关闭提示">
+          <i data-lucide="x"></i>
+        </button>
+        <p class="eyebrow">FIRST RUN</p>
+        <h2 id="onboardingTitle">SQLSimulator 使用提示</h2>
+        <div class="onboarding-steps">
+          <div>
+            <span>1</span>
+            <p>在设置里选择 NaviCat UI、普通 SQL 或 Terminal 模式。</p>
+          </div>
+          <div>
+            <span>2</span>
+            <p>左侧选择库表或示例，在中间编辑 SQL。</p>
+          </div>
+          <div>
+            <span>3</span>
+            <p>点击执行按钮，或按 Ctrl / Cmd + Enter 运行。</p>
+          </div>
+          <div>
+            <span>4</span>
+            <p>结果、可视化表和日志会在当前浏览器本地保存。</p>
+          </div>
+          <div>
+            <span>5</span>
+            <p>需要迁移时，使用加密 .sqlm 导入或导出。</p>
+          </div>
+        </div>
+        <button id="onboardingAccept" class="primary-small onboarding-accept" type="button">
+          <i data-lucide="check"></i>
+          我知道了
+        </button>
+      </section>
+    </div>
 
     <footer class="footer console-footer">
       <div class="container footer-inner">
