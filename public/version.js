@@ -51,7 +51,7 @@ async function checkVersion() {
     }
     if (version.updateAvailable) {
       renderVersionState(
-        formatVersionLabel(version),
+        version.updateEnabled ? formatVersionLabel(version) : `${formatVersionLabel(version)}，服务器未开启网页更新`,
         {
           state: "update",
           showUpdate: true,

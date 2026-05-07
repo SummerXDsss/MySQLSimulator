@@ -20,7 +20,7 @@ const SESSION_STATE_VERSION = 1;
 const APP_REPO = process.env.APP_REPO || "SummerXDsss/MySQLSimulator";
 const APP_UPDATE_BRANCH = process.env.APP_UPDATE_BRANCH || "main";
 const APP_DIR = __dirname;
-const WEB_UPDATE_ENABLED = process.env.WEB_UPDATE_ENABLED === "true";
+const WEB_UPDATE_ENABLED = process.env.WEB_UPDATE_ENABLED !== "false";
 const WEB_UPDATE_RESTART = process.env.WEB_UPDATE_RESTART === "true";
 const VERSION_CACHE_MS = 60 * 1000;
 
