@@ -24,6 +24,19 @@ const WEB_UPDATE_ENABLED = process.env.WEB_UPDATE_ENABLED === "true";
 const WEB_UPDATE_RESTART = process.env.WEB_UPDATE_RESTART === "true";
 const VERSION_CACHE_MS = 60 * 1000;
 
+function compareVersions(left, right) {
+  const cleanLeft = String(left || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const cleanRight = String(right || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(cleanLeft.length, cleanRight.length, 3);
+  for (let index = 0; index < length; index += 1) {
+    const a = cleanLeft[index] || 0;
+    const b = cleanRight[index] || 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+  return 0;
+}
+
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -302,7 +315,7 @@ function decryptSqlm(content) {
 
 function createSqlmPayload() {
   return {
-    app: "MySQL Simulator",
+    app: "SQL Database Simulator",
     format: SQLM_MAGIC,
     version: SQLM_VERSION,
     exportedAt: new Date().toISOString(),
@@ -510,11 +523,13 @@ async function getLatestVersionInfo(force = false) {
     const latestPackage = JSON.parse(packageText);
     payload.latestRevision = commit.sha || null;
     payload.latestVersion = latestPackage.version || null;
-    payload.updateAvailable = Boolean(
+    const versionBehind = compareVersions(payload.latestVersion, currentVersion) > 0;
+    const revisionBehind = Boolean(
       payload.latestRevision
       && currentRevision !== "local"
       && !payload.latestRevision.startsWith(currentRevision)
     );
+    payload.updateAvailable = Boolean(versionBehind || revisionBehind);
     payload.message = payload.updateAvailable ? "发现新版本" : "已是最新版本";
   } catch (error) {
     payload.ok = false;
@@ -1680,7 +1695,7 @@ function listen(port) {
   });
 
   appServer.listen(port, HOST, () => {
-    console.log(`MySQL Simulator running at http://${HOST}:${port}`);
+    console.log(`SQL Database Simulator running at http://${HOST}:${port}`);
   });
 }
 

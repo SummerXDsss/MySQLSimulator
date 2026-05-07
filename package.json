@@ -1,8 +1,8 @@
 {
-  "name": "mysql-simulator",
-  "version": "1.0.0",
+  "name": "sql-database-simulator",
+  "version": "1.1.0",
   "private": true,
-  "description": "MySQL simulator landing page with IDE-style SQL runner.",
+  "description": "Multi-database SQL simulator landing page with IDE-style SQL runner.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -1,4 +1,4 @@
-# MySQL Simulator
+# SQL Database Simulator
 
 ## Docker 运行
 
@@ -13,7 +13,7 @@ http://服务器IP:3000
 http://服务器IP:3000/console.html
 ```
 
-部署前建议修改 `docker-compose.yml` 里的 `SQLM_SECRET`，它用于 `.sqlm` 文件加密和解密。
+部署前建议修改 `docker-compose.yml` 里的 `SQLM_SECRET`，它用于 `.sqlm` 文件加密和解密。网页底部支持检测 GitHub 最新版本，发现更新后可点击“立即更新”。
 
 ## GitHub 自动打包
 

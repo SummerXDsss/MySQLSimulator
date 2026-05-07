@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MySQL 模拟器</title>
-    <meta name="description" content="一个用于学习、演示和验证 MySQL 指令的在线模拟器。" />
+    <title>SQL 数据库模拟器</title>
+    <meta name="description" content="一个用于学习、演示和验证多种数据库 SQL 指令的在线模拟器。" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,12 +14,13 @@
   <body class="home-page">
     <nav class="nav">
       <div class="container nav-inner">
-        <a class="brand" href="#top" aria-label="MySQL 模拟器">
+        <a class="brand" href="#top" aria-label="SQL 数据库模拟器">
           <span class="brand-mark">SQL</span>
-          <span>MySQL 模拟器</span>
+          <span>SQL 数据库模拟器</span>
         </a>
         <div class="nav-links">
           <a href="/console.html">操作台</a>
+          <a href="#databases">数据库</a>
           <a href="#features">能力</a>
           <a href="#workflow">流程</a>
         </div>
@@ -34,10 +35,10 @@
       <section class="hero section">
         <div class="container hero-grid">
           <div class="hero-copy">
-            <p class="eyebrow">MYSQL COMMAND SANDBOX</p>
-            <h1>在浏览器里练习 MySQL 指令，像 IDE 一样立即看到结果。</h1>
+            <p class="eyebrow">DATABASE SQL SANDBOX</p>
+            <h1>在浏览器里练习多种数据库 SQL，像 IDE 一样立即看到结果。</h1>
             <p class="hero-text">
-              面向教学、面试准备和产品演示的 MySQL 模拟器。支持常用建库建表、增删改查、事务、元信息和表结构调整，所有操作都在本地模拟数据中完成。
+              面向教学、面试准备和产品演示的 SQL 数据库模拟器。覆盖 MySQL、PostgreSQL、SQLite、MariaDB、SQL Server 和 Oracle 的常见 SQL 学习场景，所有操作都保存在浏览器本地状态中。
             </p>
             <div class="hero-actions">
               <a class="primary-button" href="/console.html">
@@ -88,8 +89,8 @@
       <section class="proof-bar">
         <div class="container proof-grid">
           <div>
-            <strong>40+</strong>
-            <span>常见 SQL 指令形态</span>
+            <strong>6 类</strong>
+            <span>主流数据库学习入口</span>
           </div>
           <div>
             <strong>DDL / DML</strong>
@@ -111,8 +112,8 @@
           </div>
           <div class="console-entry">
             <div>
-              <h3>MySQL 模拟操作台</h3>
-              <p>独立页面保留完整宽度，适合长时间写 SQL 和查看表格结果。</p>
+              <h3>SQL 模拟操作台</h3>
+              <p>独立页面保留完整宽度，适合长时间写 SQL、查看表格结果和保存本地模拟状态。</p>
             </div>
             <a class="primary-button" href="/console.html">
               <i data-lucide="arrow-right"></i>
@@ -120,6 +121,42 @@
             </a>
           </div>
 
+        </div>
+      </section>
+
+      <section id="databases" class="section">
+        <div class="container">
+          <div class="section-heading compact">
+            <p class="eyebrow">DATABASES</p>
+            <h2>不只面向 MySQL，也覆盖常见数据库学习场景</h2>
+            <p>首页按数据库类型展示支持范围，操作台继续提供统一 SQL 编辑、执行结果、可视化表和本地状态保存。</p>
+          </div>
+          <div class="database-grid">
+            <article class="database-card">
+              <strong>MySQL</strong>
+              <span>建库建表、SHOW / DESC、事务和常见 DML。</span>
+            </article>
+            <article class="database-card">
+              <strong>PostgreSQL</strong>
+              <span>面向 SELECT、DDL、事务和结构化查询练习。</span>
+            </article>
+            <article class="database-card">
+              <strong>SQLite</strong>
+              <span>轻量表结构、数据读写和本地状态演示。</span>
+            </article>
+            <article class="database-card">
+              <strong>MariaDB</strong>
+              <span>兼容 MySQL 风格语法和管理指令演示。</span>
+            </article>
+            <article class="database-card">
+              <strong>SQL Server</strong>
+              <span>覆盖通用 SQL 查询、更新和结果展示流程。</span>
+            </article>
+            <article class="database-card">
+              <strong>Oracle</strong>
+              <span>用于教学中对比事务、表结构和查询写法。</span>
+            </article>
+          </div>
         </div>
       </section>
 
@@ -180,7 +217,7 @@
 
     <footer class="footer">
       <div class="container footer-inner">
-        <span>MySQL Simulator</span>
+        <span>SQL Database Simulator</span>
         <div class="version-widget" data-version-widget>
           <span data-version-status>正在检测版本...</span>
           <button data-update-button type="button" hidden>立即更新</button>

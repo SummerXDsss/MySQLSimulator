@@ -1553,6 +1553,35 @@ html[data-theme="dark"] .sql-operator {
   gap: 16px;
 }
 
+.database-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.database-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.database-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-dark);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.database-card span {
+  display: block;
+  color: var(--text-mid);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .feature-card {
   min-width: 0;
   padding: 24px;
@@ -1748,6 +1777,10 @@ html[data-theme="dark"] .sql-operator {
   .feature-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .database-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -1860,6 +1893,10 @@ html[data-theme="dark"] .sql-operator {
   }
 
   .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .database-grid {
     grid-template-columns: 1fr;
   }
 

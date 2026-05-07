@@ -34,6 +34,13 @@ function formatRevision(revision) {
   return revision.slice(0, 7);
 }
 
+function formatVersionLabel(version) {
+  if (!version?.latestVersion || !version?.currentVersion || version.latestVersion === version.currentVersion) {
+    return `当前 ${formatRevision(version.currentRevision)}，最新 ${formatRevision(version.latestRevision)}`;
+  }
+  return `当前 ${version.currentVersion}，最新 ${version.latestVersion}`;
+}
+
 async function checkVersion() {
   if (!versionWidgets.length) return;
   try {
@@ -44,7 +51,7 @@ async function checkVersion() {
     }
     if (version.updateAvailable) {
       renderVersionState(
-        `当前 ${formatRevision(version.currentRevision)}，最新 ${formatRevision(version.latestRevision)}`,
+        formatVersionLabel(version),
         {
           state: "update",
           showUpdate: true,
