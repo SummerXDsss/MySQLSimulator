@@ -1,4 +1,5 @@
 const versionWidgets = document.querySelectorAll("[data-version-widget]");
+const UPDATE_TOKEN_KEY = "sqlsimulator-update-token-v1";
 
 function renderVersionState(message, options = {}) {
   versionWidgets.forEach((widget) => {
@@ -19,13 +20,29 @@ async function requestVersion() {
   return payload;
 }
 
-async function requestUpdate() {
+function getUpdateToken(version) {
+  if (!version?.updateAuthRequired) return "";
+  const storedToken = sessionStorage.getItem(UPDATE_TOKEN_KEY) || "";
+  const token = window.prompt("请输入服务器更新令牌", storedToken);
+  if (token === null) throw new Error("已取消更新");
+  sessionStorage.setItem(UPDATE_TOKEN_KEY, token);
+  return token;
+}
+
+async function requestUpdate(version) {
+  const updateToken = getUpdateToken(version);
   const response = await fetch("/api/update", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}"
+    headers: {
+      "content-type": "application/json",
+      ...(updateToken ? { "x-update-token": updateToken } : {})
+    },
+    body: JSON.stringify({ updateToken })
   });
   const payload = await response.json();
+  if (response.status === 401) {
+    sessionStorage.removeItem(UPDATE_TOKEN_KEY);
+  }
   if (!response.ok) throw new Error(payload.message || "更新失败");
   return payload;
 }
@@ -71,13 +88,20 @@ versionWidgets.forEach((widget) => {
   const button = widget.querySelector("[data-update-button]");
   if (!button) return;
   button.addEventListener("click", async () => {
+    let version;
+    try {
+      version = await requestVersion();
+    } catch (error) {
+      renderVersionState(error.message || "版本检测失败", { state: "warning" });
+      return;
+    }
     renderVersionState("正在更新，请稍候...", {
       state: "update",
       showUpdate: true,
       disabled: true
     });
     try {
-      const payload = await requestUpdate();
+      const payload = await requestUpdate(version);
       renderVersionState(payload.message || "更新完成", { state: "ok" });
       setTimeout(() => {
         window.location.reload();

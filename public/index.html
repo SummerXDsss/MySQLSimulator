@@ -8,6 +8,14 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      const savedTheme = localStorage.getItem("mysql-simulator-theme");
+      if (savedTheme) {
+        document.documentElement.dataset.theme = savedTheme;
+      } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -24,10 +32,16 @@
           <a href="#features">能力</a>
           <a href="#workflow">流程</a>
         </div>
-        <a class="nav-action" href="/console.html">
-          开始体验
-          <i data-lucide="arrow-right"></i>
-        </a>
+        <div class="nav-tools">
+          <button id="themeToggle" class="nav-tool-button" type="button" aria-label="切换深色模式">
+            <i data-lucide="moon"></i>
+            <span>深色模式</span>
+          </button>
+          <a class="nav-action" href="/console.html">
+            开始体验
+            <i data-lucide="arrow-right"></i>
+          </a>
+        </div>
       </div>
     </nav>
 
@@ -239,6 +253,7 @@
     </footer>
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="/theme.js"></script>
     <script src="/version.js"></script>
     <script>
       window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });

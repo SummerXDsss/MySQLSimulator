@@ -8,6 +8,8 @@ const runBtn = document.querySelector("#runBtn");
 const resetBtn = document.querySelector("#resetBtn");
 const importSqlmBtn = document.querySelector("#importSqlmBtn");
 const exportSqlmBtn = document.querySelector("#exportSqlmBtn");
+const exportSqlBtn = document.querySelector("#exportSqlBtn");
+const shareSqlBtn = document.querySelector("#shareSqlBtn");
 const sqlmFileInput = document.querySelector("#sqlmFileInput");
 const copyBtn = document.querySelector("#copyBtn");
 const formatBtn = document.querySelector("#formatBtn");
@@ -17,6 +19,7 @@ const settingsToggle = document.querySelector("#settingsToggle");
 const settingsPanel = document.querySelector("#settingsPanel");
 const settingsClose = document.querySelector("#settingsClose");
 const consoleModeSelect = document.querySelector("#consoleModeSelect");
+const ideThemeSelect = document.querySelector("#ideThemeSelect");
 const databaseAppSelect = document.querySelector("#databaseAppSelect");
 const showVisualDataToggle = document.querySelector("#showVisualDataToggle");
 const showVisualBuilderToggle = document.querySelector("#showVisualBuilderToggle");
@@ -27,6 +30,15 @@ const editorModeHelp = document.querySelector("#editorModeHelp");
 const onboardingOverlay = document.querySelector("#onboardingOverlay");
 const onboardingClose = document.querySelector("#onboardingClose");
 const onboardingAccept = document.querySelector("#onboardingAccept");
+const shareOverlay = document.querySelector("#shareOverlay");
+const shareClose = document.querySelector("#shareClose");
+const shareCancel = document.querySelector("#shareCancel");
+const shareAgree = document.querySelector("#shareAgree");
+const shareRiskList = document.querySelector("#shareRiskList");
+const shareLinkInput = document.querySelector("#shareLinkInput");
+const copyShareLinkBtn = document.querySelector("#copyShareLinkBtn");
+const createShareLinkBtn = document.querySelector("#createShareLinkBtn");
+const shareWatermark = document.querySelector("#shareWatermark");
 const navicatHostLabel = document.querySelector("#navicatHostLabel");
 const navicatAppLabel = document.querySelector("#navicatAppLabel");
 const navicatDbLabel = document.querySelector("#navicatDbLabel");
@@ -67,6 +79,7 @@ const ONBOARDING_COOKIE = "sqlsimulator_control_onboarding_seen";
 
 const defaultConsolePrefs = {
   databaseApp: "mysql",
+  ideTheme: "default",
   mode: "sql",
   showVisualData: true,
   showVisualBuilder: false
@@ -136,6 +149,13 @@ const modeConfigs = {
     runLabel: "执行命令",
     runHint: "Enter"
   }
+};
+
+const ideThemeConfigs = {
+  default: "默认亮色",
+  midnight: "Midnight 深色",
+  solarized: "Solarized 暖色",
+  mono: "Mono 灰度"
 };
 
 let results = [];
@@ -227,6 +247,55 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+function formatTimestampForFile(date = new Date()) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+}
+
+function analyzeSqlText(sql) {
+  const text = String(sql ?? "");
+  const errors = [];
+  const warnings = [];
+  if (!text.trim()) errors.push("SQL 内容不能为空");
+  if (new Blob([text]).size > 128 * 1024) errors.push("SQL 文件超过 128KB 限制");
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) errors.push("检测到非法控制字符");
+  if (/[\u202A-\u202E\u2066-\u2069]/.test(text)) warnings.push("检测到 Unicode 方向控制字符");
+  if (/[\u200B-\u200F\uFEFF]/.test(text)) warnings.push("检测到零宽字符");
+  if (/<\/?(script|iframe|object|embed|link|meta|style)\b/i.test(text) || /javascript\s*:/i.test(text)) {
+    warnings.push("检测到疑似脚本或 HTML 注入片段");
+  }
+  if (/(--|#|\/\*)/.test(text)) warnings.push("检测到 SQL 注释符，请确认没有隐藏语句");
+  if (/\b(load_file|into\s+outfile|into\s+dumpfile)\b/i.test(text)) warnings.push("检测到文件读写相关 SQL 语句");
+  if (/\b(drop\s+database|drop\s+table|truncate\s+table|grant\s+|revoke\s+|shutdown|kill\s+|lock\s+tables|unlock\s+tables)\b/i.test(text)) {
+    warnings.push("检测到高风险 SQL 管理指令");
+  }
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+function renderShareRisks(analysis, serverWarnings = []) {
+  const warnings = [...(analysis?.warnings || []), ...serverWarnings];
+  const errors = analysis?.errors || [];
+  if (!errors.length && !warnings.length) {
+    shareRiskList.innerHTML = '<div class="share-risk ok">未检测到非法字符或明显风险字符。</div>';
+    return;
+  }
+  shareRiskList.innerHTML = `
+    ${errors.map((item) => `<div class="share-risk error">${escapeHtml(item)}</div>`).join("")}
+    ${warnings.map((item) => `<div class="share-risk warning">${escapeHtml(item)}</div>`).join("")}
+  `;
+}
+
+function downloadTextFile(filename, content, mime = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function applyTheme(theme) {
   const nextTheme = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = nextTheme;
@@ -247,10 +316,12 @@ function loadConsolePrefs() {
     const stored = JSON.parse(localStorage.getItem(CONSOLE_PREFS_KEY) || "{}");
     const mode = modeConfigs[stored.mode] ? stored.mode : defaultConsolePrefs.mode;
     const databaseApp = databaseAppConfigs[stored.databaseApp] ? stored.databaseApp : defaultConsolePrefs.databaseApp;
+    const ideTheme = ideThemeConfigs[stored.ideTheme] ? stored.ideTheme : defaultConsolePrefs.ideTheme;
     return {
       ...defaultConsolePrefs,
       ...stored,
       databaseApp,
+      ideTheme,
       mode,
       showVisualData: typeof stored.showVisualData === "boolean" ? stored.showVisualData : defaultConsolePrefs.showVisualData,
       showVisualBuilder: typeof stored.showVisualBuilder === "boolean" ? stored.showVisualBuilder : defaultConsolePrefs.showVisualBuilder
@@ -292,9 +363,11 @@ function applyConsolePrefs({ persist = false } = {}) {
   const databaseApp = getDatabaseAppConfig();
   document.body.dataset.consoleMode = consolePrefs.mode;
   document.body.dataset.databaseApp = consolePrefs.databaseApp;
+  document.body.dataset.ideTheme = consolePrefs.ideTheme;
   document.body.classList.toggle("hide-inspector", !consolePrefs.showVisualBuilder);
   document.body.classList.toggle("hide-visual-data", !consolePrefs.showVisualData);
 
+  ideThemeSelect.value = consolePrefs.ideTheme;
   databaseAppSelect.value = consolePrefs.databaseApp;
   consoleModeSelect.value = consolePrefs.mode;
   showVisualDataToggle.checked = consolePrefs.showVisualData;
@@ -377,6 +450,93 @@ function initOnboarding() {
     onboardingAccept.focus();
     iconRefresh();
   }, 320);
+}
+
+function setShareDialogOpen(open) {
+  shareOverlay.hidden = !open;
+  if (open) {
+    shareAgree.checked = false;
+    shareLinkInput.value = "";
+    renderShareRisks(analyzeSqlText(sqlEditor.value));
+    shareAgree.focus();
+    iconRefresh();
+  }
+}
+
+function getShareTokenFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const queryToken = params.get("share");
+  if (queryToken) return queryToken;
+  const pathMatch = window.location.pathname.match(/^\/share\/([A-Za-z0-9_-]{16,})$/);
+  return pathMatch?.[1] || "";
+}
+
+async function loadSharedSqlFromToken() {
+  const token = getShareTokenFromLocation();
+  if (!token) return;
+  try {
+    const payload = await fetchJson(`/api/share/sql/${encodeURIComponent(token)}`);
+    sqlEditor.value = payload.sql || "";
+    updateEditorVisuals();
+    renderSuggestPanel(false);
+    shareWatermark.textContent = `由用户 IP 地址 ${payload.sharedByMaskedIp || "***"} 分享 · 60 分钟短效链接`;
+    shareWatermark.hidden = false;
+    addSystemLog("已载入分享 SQL", `来源 IP：${payload.sharedByMaskedIp || "***"}，有效期至 ${new Date(payload.expiresAt).toLocaleString()}`);
+    if (payload.warnings?.length) {
+      addSystemLog("分享内容风险提示", payload.warnings.join("；"), false);
+    }
+  } catch (error) {
+    addSystemLog("分享链接不可用", error.message, false);
+  }
+}
+
+function exportCurrentSql() {
+  const analysis = analyzeSqlText(sqlEditor.value);
+  if (!analysis.ok) {
+    addSystemLog("导出失败", analysis.errors.join("；"), false);
+    return;
+  }
+  downloadTextFile(`sqlsimulator-query-${formatTimestampForFile()}.sql`, sqlEditor.value, "application/sql;charset=utf-8");
+  addSystemLog("已导出 SQL", "当前编辑器内容已保存为 .sql 文件");
+  if (analysis.warnings.length) {
+    addSystemLog("导出风险提示", analysis.warnings.join("；"), false);
+  }
+}
+
+async function createShareLink() {
+  const analysis = analyzeSqlText(sqlEditor.value);
+  renderShareRisks(analysis);
+  if (!analysis.ok) {
+    addSystemLog("分享失败", analysis.errors.join("；"), false);
+    return;
+  }
+  if (!shareAgree.checked) {
+    addSystemLog("分享未创建", "请先确认免责声明和用户协议", false);
+    return;
+  }
+
+  createShareLinkBtn.disabled = true;
+  createShareLinkBtn.innerHTML = '<i data-lucide="loader-circle"></i> 创建中';
+  iconRefresh();
+  try {
+    const payload = await fetchJson("/api/share/sql", {
+      method: "POST",
+      body: JSON.stringify({
+        sql: sqlEditor.value,
+        acceptedTerms: true
+      })
+    });
+    shareLinkInput.value = payload.url;
+    renderShareRisks(payload.analysis);
+    await navigator.clipboard.writeText(payload.url).catch(() => {});
+    addSystemLog("已创建分享链接", `链接 60 分钟内有效，来源 IP 将以 ${payload.sharedByMaskedIp} 显示`);
+  } catch (error) {
+    addSystemLog("分享失败", error.message, false);
+  } finally {
+    createShareLinkBtn.disabled = false;
+    createShareLinkBtn.innerHTML = '<i data-lucide="link"></i> 创建 60 分钟链接';
+    iconRefresh();
+  }
 }
 
 function setResultState(state, label) {
@@ -1110,6 +1270,7 @@ async function bootstrap() {
   if (consolePrefs.showVisualData) {
     await loadVisualTable();
   }
+  await loadSharedSqlFromToken();
   renderSuggestPanel(false);
   iconRefresh();
 }
@@ -1163,6 +1324,7 @@ settingsPanel.addEventListener("click", (event) => {
 });
 settingsClose.addEventListener("click", () => setSettingsOpen(false));
 consoleModeSelect.addEventListener("change", () => setConsolePref("mode", consoleModeSelect.value));
+ideThemeSelect.addEventListener("change", () => setConsolePref("ideTheme", ideThemeSelect.value));
 databaseAppSelect.addEventListener("change", () => {
   setConsolePref("databaseApp", databaseAppSelect.value);
   const databaseApp = getDatabaseAppConfig();
@@ -1190,10 +1352,32 @@ document.addEventListener("keydown", (event) => {
     if (!onboardingOverlay.hidden) {
       closeOnboarding();
     }
+    if (!shareOverlay.hidden) {
+      setShareDialogOpen(false);
+    }
   }
 });
 onboardingClose.addEventListener("click", closeOnboarding);
 onboardingAccept.addEventListener("click", closeOnboarding);
+shareClose.addEventListener("click", () => setShareDialogOpen(false));
+shareCancel.addEventListener("click", () => setShareDialogOpen(false));
+shareSqlBtn.addEventListener("click", () => setShareDialogOpen(true));
+exportSqlBtn.addEventListener("click", exportCurrentSql);
+shareAgree.addEventListener("change", () => renderShareRisks(analyzeSqlText(sqlEditor.value)));
+createShareLinkBtn.addEventListener("click", createShareLink);
+copyShareLinkBtn.addEventListener("click", async () => {
+  if (!shareLinkInput.value) {
+    addSystemLog("没有可复制的链接", "请先创建分享链接", false);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(shareLinkInput.value);
+    addSystemLog("已复制分享链接", "链接将在创建后 60 分钟失效");
+  } catch {
+    shareLinkInput.select();
+    addSystemLog("复制受限", "浏览器限制了自动复制，已选中链接，可手动复制", false);
+  }
+});
 
 runBtn.addEventListener("click", runSql);
 resetBtn.addEventListener("click", resetState);

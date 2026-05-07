@@ -3,6 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const net = require("net");
 const { exec } = require("child_process");
 const { performance } = require("perf_hooks");
 
@@ -22,7 +23,19 @@ const APP_UPDATE_BRANCH = process.env.APP_UPDATE_BRANCH || "main";
 const APP_DIR = __dirname;
 const WEB_UPDATE_ENABLED = process.env.WEB_UPDATE_ENABLED !== "false";
 const WEB_UPDATE_RESTART = process.env.WEB_UPDATE_RESTART === "true";
+const WEB_UPDATE_PUBLIC = process.env.WEB_UPDATE_PUBLIC === "true";
+const WEB_UPDATE_TOKEN = process.env.WEB_UPDATE_TOKEN || process.env.UPDATE_TOKEN || "";
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+const PUBLIC_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_BASE_URL || "");
 const VERSION_CACHE_MS = 60 * 1000;
+const SHARE_TTL_MS = 60 * 60 * 1000;
+const SHARE_SQL_MAX_BYTES = 128 * 1024;
+const SHARE_AUDIT_LOG = path.join(APP_DIR, "share-audit.log");
+
+const sharedSqlStore = new Map();
+
+const SHARE_DISCLAIMER = "分享链接仅保存 SQL 文本，不保存模拟数据库状态；链接有效期 60 分钟，请勿分享真实密码、密钥、生产数据或个人敏感信息。";
+const SHARE_TERMS = "用户确认其有权分享该 SQL 文本，并自行承担由链接传播、内容合规和敏感信息泄露造成的风险。SQLSimulator 仅提供短效文本传递和模拟执行能力，不对 SQL 内容的真实性、安全性或执行后果负责。";
 
 function compareVersions(left, right) {
   const cleanLeft = String(left || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -45,6 +58,23 @@ const MIME_TYPES = {
   ".sqlm": "application/octet-stream",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon"
+};
+
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "content-security-policy": [
+    "default-src 'self'",
+    "script-src 'self' https://unpkg.com 'unsafe-inline'",
+    "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
+    "font-src https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'"
+  ].join("; ")
 };
 
 const helpRows = [
@@ -278,6 +308,134 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function normalizeBaseUrl(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeIpCandidate(value) {
+  const first = String(value || "").split(",")[0].trim().replace(/^::ffff:/, "");
+  const bracketless = first.startsWith("[") && first.includes("]")
+    ? first.slice(1, first.indexOf("]"))
+    : first;
+  const withoutIpv4Port = /^\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}$/.test(bracketless)
+    ? bracketless.replace(/:\d{1,5}$/, "")
+    : bracketless;
+  return net.isIP(withoutIpv4Port) ? withoutIpv4Port : "";
+}
+
+function getClientIp(request) {
+  if (TRUST_PROXY) {
+    const forwarded = normalizeIpCandidate(request.headers["x-forwarded-for"]);
+    const realIp = normalizeIpCandidate(request.headers["x-real-ip"]);
+    if (forwarded) return forwarded;
+    if (realIp) return realIp;
+  }
+  return normalizeIpCandidate(request.socket.remoteAddress) || request.socket.remoteAddress || "unknown";
+}
+
+function maskIpAddress(ip) {
+  const cleanIp = String(ip || "unknown").replace(/^::ffff:/, "");
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(cleanIp)) {
+    const parts = cleanIp.split(".");
+    return `${parts[0]}.${parts[1]}.***.${parts[3]}`;
+  }
+  if (cleanIp.includes(":")) {
+    const parts = cleanIp.split(":").filter(Boolean);
+    if (parts.length <= 2) return `${parts[0] || "ip"}:***`;
+    return `${parts[0]}:${parts[1]}:***:${parts[parts.length - 1]}`;
+  }
+  if (cleanIp.length <= 6) return `${cleanIp.slice(0, 1)}***`;
+  return `${cleanIp.slice(0, 3)}***${cleanIp.slice(-2)}`;
+}
+
+function writeShareAudit(event, request, data = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    ip: getClientIp(request),
+    userAgent: request.headers["user-agent"] || "",
+    ...data
+  };
+  const line = JSON.stringify(entry);
+  console.log(`[share-audit] ${line}`);
+  fs.appendFile(SHARE_AUDIT_LOG, `${line}\n`, () => {});
+}
+
+function analyzeSharedSql(sql) {
+  const text = String(sql ?? "");
+  const byteLength = Buffer.byteLength(text, "utf8");
+  const errors = [];
+  const warnings = [];
+
+  if (!text.trim()) {
+    errors.push("SQL 内容不能为空");
+  }
+  if (byteLength > SHARE_SQL_MAX_BYTES) {
+    errors.push(`SQL 文件超过 ${Math.round(SHARE_SQL_MAX_BYTES / 1024)}KB 限制`);
+  }
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) {
+    errors.push("检测到非法控制字符，请删除后再分享");
+  }
+  if (/[\u202A-\u202E\u2066-\u2069]/.test(text)) {
+    warnings.push("检测到 Unicode 方向控制字符，可能造成代码显示混淆");
+  }
+  if (/[\u200B-\u200F\uFEFF]/.test(text)) {
+    warnings.push("检测到零宽字符，可能影响 SQL 审阅");
+  }
+  if (/<\/?(script|iframe|object|embed|link|meta|style)\b/i.test(text) || /javascript\s*:/i.test(text)) {
+    warnings.push("检测到疑似脚本或 HTML 注入片段");
+  }
+  if (/(--|#|\/\*)/.test(text)) {
+    warnings.push("检测到 SQL 注释符，请确认没有隐藏语句");
+  }
+  if (/\b(load_file|into\s+outfile|into\s+dumpfile)\b/i.test(text)) {
+    warnings.push("检测到文件读写相关 SQL 语句");
+  }
+  if (/\b(drop\s+database|drop\s+table|truncate\s+table|grant\s+|revoke\s+|shutdown|kill\s+|lock\s+tables|unlock\s+tables)\b/i.test(text)) {
+    warnings.push("检测到高风险 SQL 管理指令，请确认分享对象可信");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    byteLength
+  };
+}
+
+function cleanupExpiredShares() {
+  const now = Date.now();
+  for (const [token, item] of sharedSqlStore.entries()) {
+    if (item.expiresAt <= now) {
+      sharedSqlStore.delete(token);
+    }
+  }
+}
+
+function getRequestOrigin(request) {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
+  const forwardedProto = TRUST_PROXY
+    ? String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase()
+    : "";
+  const proto = ["http", "https"].includes(forwardedProto) ? forwardedProto : "http";
+  const forwardedHost = TRUST_PROXY ? request.headers["x-forwarded-host"] : "";
+  const host = sanitizeHost(forwardedHost || request.headers.host) || `localhost:${PORT}`;
+  return `${proto}://${host}`;
+}
+
+function sanitizeHost(value) {
+  const host = String(value || "").split(",")[0].trim();
+  if (/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(host)) return host;
+  if (/^\[[0-9a-f:.]+\](?::\d{1,5})?$/i.test(host)) return host;
+  return "";
+}
+
 function encryptSqlm(payload) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv(SQLM_ALGORITHM, SQLM_KEY, iv);
@@ -365,6 +523,7 @@ function validateImportedState(importedState) {
 
 function downloadResponse(response, filename, content) {
   response.writeHead(200, {
+    ...SECURITY_HEADERS,
     "content-type": "application/octet-stream",
     "content-disposition": `attachment; filename="${filename}"`,
     "cache-control": "no-store"
@@ -375,6 +534,7 @@ function downloadResponse(response, filename, content) {
 function jsonResponse(response, status, data) {
   const body = JSON.stringify(data, null, 2);
   response.writeHead(status, {
+    ...SECURITY_HEADERS,
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store"
   });
@@ -396,30 +556,43 @@ function readBody(request) {
   });
 }
 
+function sendText(response, status, message) {
+  response.writeHead(status, { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8" });
+  response.end(message);
+}
+
 function serveStatic(request, response) {
-  const requestedPath = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+  let requestedPath;
+  try {
+    requestedPath = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+  } catch {
+    sendText(response, 400, "Bad request");
+    return;
+  }
   const safePath = requestedPath === "/"
     ? "/index.html"
     : ["/control", "/control.html"].includes(requestedPath)
       ? "/console.html"
+      : /^\/share\/[A-Za-z0-9_-]{16,}$/.test(requestedPath)
+        ? "/console.html"
       : requestedPath;
-  const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
+  const filePath = path.normalize(path.join(PUBLIC_DIR, safePath.replace(/^\/+/, "")));
+  const relativePath = path.relative(PUBLIC_DIR, filePath);
 
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    response.writeHead(403);
-    response.end("Forbidden");
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    sendText(response, 403, "Forbidden");
     return;
   }
 
   fs.readFile(filePath, (error, content) => {
     if (error) {
-      response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-      response.end("Not found");
+      sendText(response, 404, "Not found");
       return;
     }
 
     const ext = path.extname(filePath);
     response.writeHead(200, {
+      ...SECURITY_HEADERS,
       "content-type": MIME_TYPES[ext] || "application/octet-stream",
       "cache-control": "no-store"
     });
@@ -524,6 +697,7 @@ async function getLatestVersionInfo(force = false) {
     checkedAt: new Date().toISOString(),
     updateAvailable: false,
     updateEnabled: WEB_UPDATE_ENABLED,
+    updateAuthRequired: Boolean(WEB_UPDATE_TOKEN),
     message: "已是最新版本"
   };
 
@@ -551,6 +725,44 @@ async function getLatestVersionInfo(force = false) {
 
   versionCache = { checkedAt: now, payload };
   return payload;
+}
+
+function decorateVersionForRequest(version) {
+  const payload = {
+    ...version,
+    updateAuthRequired: Boolean(WEB_UPDATE_TOKEN),
+    updateEnabled: Boolean(WEB_UPDATE_ENABLED && (WEB_UPDATE_PUBLIC || WEB_UPDATE_TOKEN))
+  };
+  if (WEB_UPDATE_ENABLED && !payload.updateEnabled) {
+    payload.message = payload.updateAvailable
+      ? "发现新版本，但服务器未配置更新权限"
+      : payload.message;
+  }
+  return payload;
+}
+
+function timingSafeEqualText(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function authorizeWebUpdate(request, payload = {}) {
+  if (!WEB_UPDATE_ENABLED) {
+    return { ok: false, status: 400, message: "服务器未开启网页更新" };
+  }
+  if (WEB_UPDATE_PUBLIC) {
+    return { ok: true };
+  }
+  if (!WEB_UPDATE_TOKEN) {
+    return { ok: false, status: 403, message: "服务器未配置更新令牌" };
+  }
+  const providedToken = request.headers["x-update-token"] || payload.updateToken || "";
+  if (!timingSafeEqualText(providedToken, WEB_UPDATE_TOKEN)) {
+    return { ok: false, status: 401, message: "更新令牌不正确" };
+  }
+  return { ok: true };
 }
 
 function shellQuote(value) {
@@ -1503,16 +1715,18 @@ function getSchemaSummary() {
 
 async function handleApi(request, response, pathname) {
   if (request.method === "GET" && pathname === "/api/version") {
-    jsonResponse(response, 200, await getLatestVersionInfo());
+    jsonResponse(response, 200, decorateVersionForRequest(await getLatestVersionInfo()));
     return;
   }
 
   if (request.method === "POST" && pathname === "/api/update") {
     try {
-      if (!WEB_UPDATE_ENABLED) {
-        jsonResponse(response, 400, {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      const auth = authorizeWebUpdate(request, payload);
+      if (!auth.ok) {
+        jsonResponse(response, auth.status, {
           ok: false,
-          message: "服务器未开启网页更新"
+          message: auth.message
         });
         return;
       }
@@ -1530,7 +1744,7 @@ async function handleApi(request, response, pathname) {
       jsonResponse(response, 200, {
         ok: true,
         message: WEB_UPDATE_RESTART ? "更新完成，服务正在重启" : "更新完成，刷新页面后生效",
-        version: await getLatestVersionInfo(true)
+        version: decorateVersionForRequest(await getLatestVersionInfo(true))
       });
       if (WEB_UPDATE_RESTART) {
         setTimeout(() => process.exit(0), 500);
@@ -1603,6 +1817,103 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/examples") {
     jsonResponse(response, 200, { examples });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/share/sql") {
+    try {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      if (!payload.acceptedTerms) {
+        jsonResponse(response, 400, {
+          ok: false,
+          message: "请先确认免责声明和用户协议"
+        });
+        return;
+      }
+      const sql = String(payload.sql || "");
+      const analysis = analyzeSharedSql(sql);
+      if (!analysis.ok) {
+        writeShareAudit("share.reject", request, {
+          reason: analysis.errors.join("; "),
+          byteLength: analysis.byteLength
+        });
+        jsonResponse(response, 400, {
+          ok: false,
+          message: "SQL 内容未通过安全检查",
+          analysis,
+          disclaimer: SHARE_DISCLAIMER,
+          terms: SHARE_TERMS
+        });
+        return;
+      }
+
+      cleanupExpiredShares();
+      const token = crypto.randomBytes(24).toString("base64url");
+      const now = Date.now();
+      const ip = getClientIp(request);
+      const item = {
+        token,
+        sql,
+        createdAt: now,
+        expiresAt: now + SHARE_TTL_MS,
+        creatorIp: ip,
+        creatorMaskedIp: maskIpAddress(ip),
+        warnings: analysis.warnings
+      };
+      sharedSqlStore.set(token, item);
+      writeShareAudit("share.create", request, {
+        token,
+        maskedIp: item.creatorMaskedIp,
+        byteLength: analysis.byteLength,
+        expiresAt: new Date(item.expiresAt).toISOString(),
+        warnings: analysis.warnings
+      });
+      jsonResponse(response, 200, {
+        ok: true,
+        token,
+        url: `${getRequestOrigin(request)}/share/${token}`,
+        expiresAt: new Date(item.expiresAt).toISOString(),
+        ttlSeconds: Math.floor(SHARE_TTL_MS / 1000),
+        sharedByMaskedIp: item.creatorMaskedIp,
+        analysis,
+        disclaimer: SHARE_DISCLAIMER,
+        terms: SHARE_TERMS
+      });
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message });
+    }
+    return;
+  }
+
+  const shareMatch = pathname.match(/^\/api\/share\/sql\/([A-Za-z0-9_-]{16,})$/);
+  if (request.method === "GET" && shareMatch) {
+    cleanupExpiredShares();
+    const token = shareMatch[1];
+    const item = sharedSqlStore.get(token);
+    if (!item) {
+      writeShareAudit("share.miss", request, { token });
+      jsonResponse(response, 404, {
+        ok: false,
+        message: "分享链接不存在或已过期"
+      });
+      return;
+    }
+    writeShareAudit("share.open", request, {
+      token,
+      creatorIp: item.creatorIp,
+      creatorMaskedIp: item.creatorMaskedIp
+    });
+    jsonResponse(response, 200, {
+      ok: true,
+      token,
+      sql: item.sql,
+      createdAt: new Date(item.createdAt).toISOString(),
+      expiresAt: new Date(item.expiresAt).toISOString(),
+      sharedByMaskedIp: item.creatorMaskedIp,
+      warnings: item.warnings,
+      disclaimer: SHARE_DISCLAIMER,
+      terms: SHARE_TERMS
+    });
     return;
   }
 
@@ -1686,12 +1997,18 @@ async function handleApi(request, response, pathname) {
 
 function createServer() {
   return http.createServer(async (request, response) => {
-    const { pathname } = new URL(request.url, `http://${request.headers.host}`);
-    if (pathname.startsWith("/api/")) {
-      await handleApi(request, response, pathname);
-      return;
+    try {
+      const { pathname } = new URL(request.url, `http://${request.headers.host}`);
+      if (pathname.startsWith("/api/")) {
+        await handleApi(request, response, pathname);
+        return;
+      }
+      serveStatic(request, response);
+    } catch (error) {
+      if (!response.headersSent) {
+        jsonResponse(response, 500, { ok: false, message: "服务器内部错误" });
+      }
     }
-    serveStatic(request, response);
   });
 }
 

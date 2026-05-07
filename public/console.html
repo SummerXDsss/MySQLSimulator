@@ -57,6 +57,15 @@
                 </select>
               </label>
               <label class="settings-field">
+                IDE 主题
+                <select id="ideThemeSelect">
+                  <option value="default">默认亮色</option>
+                  <option value="midnight">Midnight 深色</option>
+                  <option value="solarized">Solarized 暖色</option>
+                  <option value="mono">Mono 灰度</option>
+                </select>
+              </label>
+              <label class="settings-field">
                 数据库应用
                 <select id="databaseAppSelect">
                   <option value="mysql">MySQL</option>
@@ -180,6 +189,14 @@
                   <button id="copyBtn" class="tool-button" type="button" title="复制 SQL">
                     <i data-lucide="copy"></i>
                     <span>复制</span>
+                  </button>
+                  <button id="exportSqlBtn" class="tool-button" type="button" title="导出当前 SQL 语句">
+                    <i data-lucide="file-down"></i>
+                    <span>导出 SQL</span>
+                  </button>
+                  <button id="shareSqlBtn" class="tool-button" type="button" title="创建 60 分钟短效分享链接">
+                    <i data-lucide="share-2"></i>
+                    <span>分享 SQL</span>
                   </button>
                   <button id="resetBtn" class="tool-button danger" type="button" title="重置模拟数据">
                     <i data-lucide="rotate-ccw"></i>
@@ -383,6 +400,8 @@
       </section>
     </main>
 
+    <div id="shareWatermark" class="share-watermark" hidden></div>
+
     <div id="onboardingOverlay" class="onboarding-overlay" hidden>
       <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
         <button id="onboardingClose" class="icon-button onboarding-close" type="button" aria-label="关闭提示">
@@ -416,6 +435,41 @@
           <i data-lucide="check"></i>
           我知道了
         </button>
+      </section>
+    </div>
+
+    <div id="shareOverlay" class="onboarding-overlay" hidden>
+      <section class="onboarding-card share-card" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+        <button id="shareClose" class="icon-button onboarding-close" type="button" aria-label="关闭分享">
+          <i data-lucide="x"></i>
+        </button>
+        <p class="eyebrow">SHARE SQL</p>
+        <h2 id="shareTitle">分享当前 SQL</h2>
+        <div class="share-legal">
+          <strong>免责声明</strong>
+          <p>分享链接仅保存 SQL 文本，不保存模拟数据库状态；链接有效期 60 分钟，请勿分享真实密码、密钥、生产数据或个人敏感信息。</p>
+          <strong>用户协议</strong>
+          <p>你确认有权分享该 SQL 文本，并自行承担由链接传播、内容合规和敏感信息泄露造成的风险。SQLSimulator 仅提供短效文本传递和模拟执行能力。</p>
+        </div>
+        <div id="shareRiskList" class="share-risk-list"></div>
+        <label class="share-agree">
+          <input id="shareAgree" type="checkbox" />
+          <span>我已阅读并同意免责声明和用户协议</span>
+        </label>
+        <div class="share-link-row">
+          <input id="shareLinkInput" type="text" readonly placeholder="创建后显示短效链接" />
+          <button id="copyShareLinkBtn" class="tool-button" type="button">
+            <i data-lucide="copy"></i>
+            <span>复制</span>
+          </button>
+        </div>
+        <div class="builder-actions">
+          <button id="shareCancel" class="ghost-button" type="button">取消</button>
+          <button id="createShareLinkBtn" class="primary-small" type="button">
+            <i data-lucide="link"></i>
+            创建 60 分钟链接
+          </button>
+        </div>
       </section>
     </div>
 

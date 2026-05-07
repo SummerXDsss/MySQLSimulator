@@ -10,5 +10,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       SQLM_SECRET: change-this-secret-before-deploy
+      TRUST_PROXY: "false"
       WEB_UPDATE_ENABLED: "true"
       WEB_UPDATE_RESTART: "true"
+      WEB_UPDATE_TOKEN: change-this-update-token-before-deploy
