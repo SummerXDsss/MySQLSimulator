@@ -54,33 +54,46 @@
 
           <div class="hero-product" aria-label="模拟器预览">
             <div class="mini-window-top">
-              <span></span>
-              <span></span>
-              <span></span>
-              <strong>demo</strong>
+              <div class="mini-window-controls" aria-hidden="true">
+                <span class="control-close"></span>
+                <span class="control-minimize"></span>
+                <span class="control-maximize"></span>
+              </div>
+              <strong>SQLSimulator · demo.orders</strong>
+              <em>执行成功 · 8.0.36-simulator</em>
             </div>
-            <div class="mini-editor">
-              <code>SELECT id, status, total_amount</code>
-              <code>FROM orders</code>
-              <code>WHERE status = 'paid'</code>
-              <code>ORDER BY id DESC;</code>
+            <div class="mini-code-title">
+              <span>Query 1.sql</span>
+              <small>Ctrl Enter</small>
             </div>
+            <pre class="mini-editor" aria-label="SQL 代码预览"><code><span class="line-no">1</span><span class="sql-keyword">SELECT</span> id, status, total_amount
+<span class="line-no">2</span><span class="sql-keyword">FROM</span> orders
+<span class="line-no">3</span><span class="sql-keyword">WHERE</span> status <span class="sql-operator">=</span> <span class="sql-string">'paid'</span>
+<span class="line-no">4</span><span class="sql-keyword">ORDER BY</span> id <span class="sql-keyword">DESC</span>
+<span class="line-no">5</span><span class="sql-keyword">LIMIT</span> <span class="sql-number">5</span>;</code></pre>
             <div class="mini-result">
-              <div class="mini-row mini-head">
-                <span>id</span>
-                <span>status</span>
-                <span>total_amount</span>
+              <div class="mini-result-top">
+                <span>执行结果</span>
+                <small>2 rows · 9.39 ms</small>
               </div>
-              <div class="mini-row">
-                <span>1004</span>
-                <span>paid</span>
-                <span>171.50</span>
+              <div class="mini-result-table">
+                <div class="mini-row mini-head">
+                  <span>id</span>
+                  <span>status</span>
+                  <span>total_amount</span>
+                </div>
+                <div class="mini-row">
+                  <span>1004</span>
+                  <span><b class="mini-status">paid</b></span>
+                  <span>171.50</span>
+                </div>
+                <div class="mini-row">
+                  <span>1001</span>
+                  <span><b class="mini-status">paid</b></span>
+                  <span>231.40</span>
+                </div>
               </div>
-              <div class="mini-row">
-                <span>1001</span>
-                <span>paid</span>
-                <span>231.40</span>
-              </div>
+              <div class="mini-result-message">Query OK, 2 rows in set</div>
             </div>
           </div>
         </div>
