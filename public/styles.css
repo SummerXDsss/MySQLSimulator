@@ -2255,6 +2255,17 @@ html[data-theme="dark"] .sql-operator {
     padding: 12px 0 16px;
   }
 
+  .home-page .console-entry {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px;
+  }
+
+  .home-page .console-entry .primary-button {
+    width: 100%;
+  }
+
   .console-titlebar {
     align-items: flex-start;
     flex-direction: column;

@@ -4,6 +4,7 @@ function renderVersionState(message, options = {}) {
   versionWidgets.forEach((widget) => {
     const status = widget.querySelector("[data-version-status]");
     const button = widget.querySelector("[data-update-button]");
+    if (!status || !button) return;
     status.textContent = message;
     widget.dataset.state = options.state || "idle";
     button.hidden = !options.showUpdate;
@@ -68,6 +69,7 @@ async function checkVersion() {
 
 versionWidgets.forEach((widget) => {
   const button = widget.querySelector("[data-update-button]");
+  if (!button) return;
   button.addEventListener("click", async () => {
     renderVersionState("正在更新，请稍候...", {
       state: "update",
