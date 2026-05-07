@@ -136,7 +136,7 @@ button {
   background: var(--primary);
   color: #ffffff;
   font-size: 11px;
-  letter-spacing: 0;
+  letter-spacing: 0px;
 }
 
 .nav-links {
@@ -888,6 +888,11 @@ h3 {
   color: var(--editor-line);
   font-family: var(--font-mono);
   font-size: 14px;
+  font-weight: 500;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  letter-spacing: 0px;
   line-height: 1.65;
   text-align: right;
   user-select: none;
@@ -910,9 +915,14 @@ h3 {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 14px;
-  font-variant-ligatures: contextual;
+  font-weight: 500;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  letter-spacing: 0;
   line-height: 1.65;
   tab-size: 2;
+  text-rendering: geometricPrecision;
   white-space: pre;
 }
 
@@ -927,6 +937,22 @@ h3 {
   display: block;
   min-width: max-content;
   padding: 18px 20px 60px;
+  font: inherit;
+  font-kerning: inherit;
+  font-variant-ligatures: inherit;
+  font-feature-settings: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  tab-size: inherit;
+}
+
+#highlightCode span {
+  font: inherit;
+  font-kerning: inherit;
+  font-variant-ligatures: inherit;
+  font-feature-settings: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
 }
 
 #sqlEditor {
@@ -950,12 +976,17 @@ h3 {
 
 .sql-keyword {
   color: #1d4ed8;
-  font-weight: 700;
+  font-weight: inherit;
 }
 
 .sql-function {
   color: #7c3aed;
-  font-weight: 700;
+  font-weight: inherit;
+}
+
+.sql-type {
+  color: #0891b2;
+  font-weight: inherit;
 }
 
 .sql-string {
@@ -981,6 +1012,10 @@ html[data-theme="dark"] .sql-keyword {
 
 html[data-theme="dark"] .sql-function {
   color: #c4b5fd;
+}
+
+html[data-theme="dark"] .sql-type {
+  color: #67e8f9;
 }
 
 html[data-theme="dark"] .sql-string {

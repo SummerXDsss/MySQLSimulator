@@ -87,14 +87,29 @@ const snippetSuggestions = [
 ];
 
 const sqlKeywordSet = new Set([
-  "ADD", "ALTER", "AND", "AS", "ASC", "AUTO_INCREMENT", "BEGIN", "BY", "COLUMN", "COMMIT",
-  "CREATE", "DATABASE", "DATABASES", "DEFAULT", "DELETE", "DESC", "DESCRIBE", "DROP", "EXPLAIN",
-  "FROM", "GROUP", "HELP", "INDEX", "INSERT", "INTO", "KEY", "LIKE", "LIMIT", "NOT", "NULL",
-  "ORDER", "PRIMARY", "RENAME", "ROLLBACK", "SELECT", "SET", "SHOW", "START", "TABLE", "TABLES",
-  "TO", "TRANSACTION", "TRUNCATE", "UPDATE", "USE", "VALUES", "WHERE"
+  "ADD", "AFTER", "ALGORITHM", "ALL", "ALTER", "ANALYZE", "AND", "AS", "ASC", "AUTO_INCREMENT",
+  "BEFORE", "BEGIN", "BETWEEN", "BY", "CASCADE", "CASE", "CHANGE", "CHARACTER", "CHECK", "COLLATE",
+  "COLUMN", "COLUMNS", "COMMIT", "CONSTRAINT", "CREATE", "CROSS", "CURRENT_TIMESTAMP", "DATABASE",
+  "DATABASES", "DEFAULT", "DELETE", "DESC", "DESCRIBE", "DISTINCT", "DROP", "ELSE", "END", "ENGINE",
+  "EXISTS", "EXPLAIN", "FALSE", "FIRST", "FOREIGN", "FROM", "FULL", "GROUP", "HAVING", "HELP",
+  "IF", "IGNORE", "IN", "INDEX", "INNER", "INSERT", "INTO", "IS", "JOIN", "KEY", "LEFT", "LIKE",
+  "LIMIT", "LOCK", "NOT", "NULL", "ON", "OR", "ORDER", "OUTER", "PRIMARY", "REFERENCES", "RENAME",
+  "REPLACE", "RIGHT", "ROLLBACK", "SELECT", "SET", "SHOW", "START", "TABLE", "TABLES", "THEN",
+  "TO", "TRANSACTION", "TRUE", "TRUNCATE", "UNION", "UNIQUE", "UNLOCK", "UPDATE", "USE", "USING",
+  "VALUES", "VIEW", "WHEN", "WHERE"
 ]);
 
-const sqlFunctionSet = new Set(["AVG", "COUNT", "DATABASE", "MAX", "MIN", "NOW", "SUM", "USER", "VERSION"]);
+const sqlTypeSet = new Set([
+  "BIGINT", "BINARY", "BIT", "BLOB", "BOOL", "BOOLEAN", "CHAR", "DATE", "DATETIME", "DECIMAL",
+  "DOUBLE", "ENUM", "FLOAT", "INT", "INTEGER", "JSON", "LONGTEXT", "MEDIUMINT", "NUMERIC", "REAL",
+  "SMALLINT", "TEXT", "TIME", "TIMESTAMP", "TINYINT", "VARCHAR"
+]);
+
+const sqlFunctionSet = new Set([
+  "AVG", "COALESCE", "CONCAT", "COUNT", "CURDATE", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_USER",
+  "DATABASE", "DATE_FORMAT", "IFNULL", "LOWER", "MAX", "MIN", "NOW", "ROUND", "SUM", "UPPER", "USER",
+  "VERSION"
+]);
 
 function iconRefresh() {
   if (window.lucide) {
@@ -136,7 +151,7 @@ function setResultState(state, label) {
 }
 
 function highlightSql(sql) {
-  const tokenPattern = /(--[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|''|[^'])*'|"(?:\\.|[^"])*"|`[^`]*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w$]*\b|<>|!=|<=|>=|:=|[(),.;=*<>+-])/g;
+  const tokenPattern = /(--[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|''|[^'])*'|"(?:\\.|[^"])*"|`[^`]*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w$]*\b|<>|!=|<=|>=|:=|[(),.;=*<>+-])/g;
   let html = "";
   let cursor = 0;
   let match;
@@ -145,18 +160,22 @@ function highlightSql(sql) {
     const token = match[0];
     html += escapeHtml(sql.slice(cursor, match.index));
     const upperToken = token.toUpperCase();
+    const rest = sql.slice(match.index + token.length);
+    const isFunctionCall = sqlFunctionSet.has(upperToken) && /^\s*\(/.test(rest);
 
-    if (token.startsWith("--") || token.startsWith("/*")) {
+    if (token.startsWith("--") || token.startsWith("#") || token.startsWith("/*")) {
       html += `<span class="sql-comment">${escapeHtml(token)}</span>`;
     } else if (token.startsWith("'") || token.startsWith('"') || token.startsWith("`")) {
       html += `<span class="sql-string">${escapeHtml(token)}</span>`;
     } else if (/^\d/.test(token)) {
       html += `<span class="sql-number">${escapeHtml(token)}</span>`;
+    } else if (isFunctionCall) {
+      html += `<span class="sql-function">${escapeHtml(token)}</span>`;
     } else if (sqlKeywordSet.has(upperToken)) {
       html += `<span class="sql-keyword">${escapeHtml(token)}</span>`;
-    } else if (sqlFunctionSet.has(upperToken)) {
-      html += `<span class="sql-function">${escapeHtml(token)}</span>`;
-    } else if (/^[(),.;=*<>+-]|<>|!=|<=|>=|:=$/.test(token)) {
+    } else if (sqlTypeSet.has(upperToken)) {
+      html += `<span class="sql-type">${escapeHtml(token)}</span>`;
+    } else if (/^(?:[(),.;=*<>+-]|<>|!=|<=|>=|:=)$/.test(token)) {
       html += `<span class="sql-operator">${escapeHtml(token)}</span>`;
     } else {
       html += escapeHtml(token);
