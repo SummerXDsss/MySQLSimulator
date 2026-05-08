@@ -6,11 +6,15 @@ const suggestionList = document.querySelector("#suggestionList");
 const suggestStatus = document.querySelector("#suggestStatus");
 const runBtn = document.querySelector("#runBtn");
 const resetBtn = document.querySelector("#resetBtn");
+const importExportToggle = document.querySelector("#importExportToggle");
+const importExportMenu = document.querySelector("#importExportMenu");
+const importSqlBtn = document.querySelector("#importSqlBtn");
 const importSqlmBtn = document.querySelector("#importSqlmBtn");
 const exportSqlmBtn = document.querySelector("#exportSqlmBtn");
 const exportSqlBtn = document.querySelector("#exportSqlBtn");
 const shareSqlBtn = document.querySelector("#shareSqlBtn");
 const sqlmFileInput = document.querySelector("#sqlmFileInput");
+const sqlFileInput = document.querySelector("#sqlFileInput");
 const copyBtn = document.querySelector("#copyBtn");
 const formatBtn = document.querySelector("#formatBtn");
 const loadVisualBtn = document.querySelector("#loadVisualBtn");
@@ -251,12 +255,13 @@ function formatTimestampForFile(date = new Date()) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
 }
 
-function analyzeSqlText(sql) {
+function analyzeSqlText(sql, options = {}) {
   const text = String(sql ?? "");
+  const maxBytes = options.maxBytes || 128 * 1024;
   const errors = [];
   const warnings = [];
   if (!text.trim()) errors.push("SQL 内容不能为空");
-  if (new Blob([text]).size > 128 * 1024) errors.push("SQL 文件超过 128KB 限制");
+  if (new Blob([text]).size > maxBytes) errors.push(`SQL 文件超过 ${Math.round(maxBytes / 1024)}KB 限制`);
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) errors.push("检测到非法控制字符");
   if (/[\u202A-\u202E\u2066-\u2069]/.test(text)) warnings.push("检测到 Unicode 方向控制字符");
   if (/[\u200B-\u200F\uFEFF]/.test(text)) warnings.push("检测到零宽字符");
@@ -411,7 +416,17 @@ function setSettingsOpen(open) {
   settingsPanel.hidden = !open;
   settingsToggle.setAttribute("aria-expanded", String(open));
   if (open) {
+    setImportExportMenuOpen(false);
     consoleModeSelect.focus();
+  }
+}
+
+function setImportExportMenuOpen(open) {
+  importExportMenu.hidden = !open;
+  importExportToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    settingsPanel.hidden = true;
+    settingsToggle.setAttribute("aria-expanded", "false");
   }
 }
 
@@ -500,6 +515,22 @@ function exportCurrentSql() {
   addSystemLog("已导出 SQL", "当前编辑器内容已保存为 .sql 文件");
   if (analysis.warnings.length) {
     addSystemLog("导出风险提示", analysis.warnings.join("；"), false);
+  }
+}
+
+async function importSqlFile(file) {
+  if (!file) return;
+  const content = await file.text();
+  const analysis = analyzeSqlText(content, { maxBytes: 512 * 1024 });
+  if (!analysis.ok) {
+    throw new Error(analysis.errors.join("；"));
+  }
+  sqlEditor.value = content;
+  updateEditorVisuals();
+  renderSuggestPanel(false);
+  addSystemLog("已导入 SQL", `${file.name || "query.sql"} 已载入编辑器`);
+  if (analysis.warnings.length) {
+    addSystemLog("导入风险提示", analysis.warnings.join("；"), false);
   }
 }
 
@@ -1323,6 +1354,13 @@ settingsPanel.addEventListener("click", (event) => {
   event.stopPropagation();
 });
 settingsClose.addEventListener("click", () => setSettingsOpen(false));
+importExportToggle.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setImportExportMenuOpen(importExportMenu.hidden);
+});
+importExportMenu.addEventListener("click", (event) => {
+  event.stopPropagation();
+});
 consoleModeSelect.addEventListener("change", () => setConsolePref("mode", consoleModeSelect.value));
 ideThemeSelect.addEventListener("change", () => setConsolePref("ideTheme", ideThemeSelect.value));
 databaseAppSelect.addEventListener("change", () => {
@@ -1343,6 +1381,9 @@ document.addEventListener("click", () => {
   if (!settingsPanel.hidden) {
     setSettingsOpen(false);
   }
+  if (!importExportMenu.hidden) {
+    setImportExportMenuOpen(false);
+  }
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -1355,14 +1396,23 @@ document.addEventListener("keydown", (event) => {
     if (!shareOverlay.hidden) {
       setShareDialogOpen(false);
     }
+    if (!importExportMenu.hidden) {
+      setImportExportMenuOpen(false);
+    }
   }
 });
 onboardingClose.addEventListener("click", closeOnboarding);
 onboardingAccept.addEventListener("click", closeOnboarding);
 shareClose.addEventListener("click", () => setShareDialogOpen(false));
 shareCancel.addEventListener("click", () => setShareDialogOpen(false));
-shareSqlBtn.addEventListener("click", () => setShareDialogOpen(true));
-exportSqlBtn.addEventListener("click", exportCurrentSql);
+shareSqlBtn.addEventListener("click", () => {
+  setImportExportMenuOpen(false);
+  setShareDialogOpen(true);
+});
+exportSqlBtn.addEventListener("click", () => {
+  setImportExportMenuOpen(false);
+  exportCurrentSql();
+});
 shareAgree.addEventListener("change", () => renderShareRisks(analyzeSqlText(sqlEditor.value)));
 createShareLinkBtn.addEventListener("click", createShareLink);
 copyShareLinkBtn.addEventListener("click", async () => {
@@ -1382,10 +1432,23 @@ copyShareLinkBtn.addEventListener("click", async () => {
 runBtn.addEventListener("click", runSql);
 resetBtn.addEventListener("click", resetState);
 exportSqlmBtn.addEventListener("click", () => {
+  setImportExportMenuOpen(false);
   exportSqlm().catch((error) => addSystemLog("下载失败", error.message, false));
 });
+importSqlBtn.addEventListener("click", () => {
+  setImportExportMenuOpen(false);
+  sqlFileInput.click();
+});
 importSqlmBtn.addEventListener("click", () => {
+  setImportExportMenuOpen(false);
   sqlmFileInput.click();
+});
+sqlFileInput.addEventListener("change", () => {
+  importSqlFile(sqlFileInput.files?.[0])
+    .catch((error) => addSystemLog("导入 SQL 失败", error.message, false))
+    .finally(() => {
+      sqlFileInput.value = "";
+    });
 });
 sqlmFileInput.addEventListener("change", () => {
   importSqlm(sqlmFileInput.files?.[0])

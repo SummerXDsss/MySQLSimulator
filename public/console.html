@@ -190,28 +190,42 @@
                     <i data-lucide="copy"></i>
                     <span>复制</span>
                   </button>
-                  <button id="exportSqlBtn" class="tool-button" type="button" title="导出当前 SQL 语句">
-                    <i data-lucide="file-down"></i>
-                    <span>导出 SQL</span>
-                  </button>
-                  <button id="shareSqlBtn" class="tool-button" type="button" title="创建 60 分钟短效分享链接">
-                    <i data-lucide="share-2"></i>
-                    <span>分享 SQL</span>
-                  </button>
+                  <div class="import-export-wrap">
+                    <button id="importExportToggle" class="tool-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="importExportMenu" title="导入、导出和分享">
+                      <i data-lucide="folder-input"></i>
+                      <span>导入/导出</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div id="importExportMenu" class="import-export-menu" role="menu" hidden>
+                      <button id="importSqlBtn" type="button" role="menuitem">
+                        <i data-lucide="file-input"></i>
+                        <span>导入 .sql</span>
+                      </button>
+                      <button id="exportSqlBtn" type="button" role="menuitem">
+                        <i data-lucide="file-down"></i>
+                        <span>导出 SQL</span>
+                      </button>
+                      <button id="shareSqlBtn" type="button" role="menuitem">
+                        <i data-lucide="share-2"></i>
+                        <span>分享 SQL</span>
+                      </button>
+                      <span class="menu-separator" aria-hidden="true"></span>
+                      <button id="importSqlmBtn" type="button" role="menuitem">
+                        <i data-lucide="upload"></i>
+                        <span>导入 .sqlm</span>
+                      </button>
+                      <button id="exportSqlmBtn" type="button" role="menuitem">
+                        <i data-lucide="download"></i>
+                        <span>导出 .sqlm</span>
+                      </button>
+                    </div>
+                  </div>
                   <button id="resetBtn" class="tool-button danger" type="button" title="重置模拟数据">
                     <i data-lucide="rotate-ccw"></i>
                     <span>重置数据</span>
                   </button>
                   </div>
                   <div class="tool-group">
-                  <button id="importSqlmBtn" class="tool-button" type="button" title="上传加密 sqlm 文件">
-                    <i data-lucide="upload"></i>
-                    <span>导入 .sqlm</span>
-                  </button>
-                  <button id="exportSqlmBtn" class="tool-button" type="button" title="下载加密 sqlm 文件">
-                    <i data-lucide="download"></i>
-                    <span>导出 .sqlm</span>
-                  </button>
                   <button id="loadVisualBtn" class="tool-button" type="button" title="刷新当前可视化表">
                     <i data-lucide="panel-bottom-open"></i>
                     <span>载入当前表</span>
@@ -223,6 +237,7 @@
                     <small>Ctrl Enter</small>
                   </button>
                   <input id="sqlmFileInput" type="file" accept=".sqlm" hidden />
+                  <input id="sqlFileInput" type="file" accept=".sql,.txt,text/sql,text/plain" hidden />
                 </div>
               </div>
 

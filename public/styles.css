@@ -1295,6 +1295,65 @@ h3 {
   color: var(--primary);
 }
 
+.import-export-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.import-export-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 70;
+  width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+}
+
+.import-export-menu[hidden] {
+  display: none;
+}
+
+.import-export-menu button {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-mid);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: left;
+}
+
+.import-export-menu button:hover,
+.import-export-menu button:focus-visible {
+  background: var(--surface-muted);
+  color: var(--primary);
+  outline: none;
+}
+
+.import-export-menu svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.menu-separator {
+  display: block;
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
 .tool-button.danger:hover {
   color: var(--danger);
 }
@@ -2382,7 +2441,8 @@ h3 {
   }
 
   .toolbar-actions {
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow: visible;
     padding-bottom: 2px;
   }
 }
@@ -2556,7 +2616,8 @@ h3 {
   .toolbar-actions {
     width: 100%;
     justify-content: flex-start;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .tool-group {
