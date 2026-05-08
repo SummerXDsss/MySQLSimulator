@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SQL 数据库模拟器</title>
-    <meta name="description" content="一个用于学习、演示和验证多种数据库 SQL 指令的在线模拟器。" />
+    <title>前后端全栈开发模拟器</title>
+    <meta name="description" content="一个用于学习、演示和验证数据库 SQL 与 JavaScript 代码的全栈开发模拟器。" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,9 +22,9 @@
   <body class="home-page">
     <nav class="nav">
       <div class="container nav-inner">
-        <a class="brand" href="#top" aria-label="SQL 数据库模拟器">
-          <span class="brand-mark">SQL</span>
-          <span>SQL 数据库模拟器</span>
+        <a class="brand" href="#top" aria-label="前后端全栈开发模拟器">
+          <span class="brand-mark">DEV</span>
+          <span>前后端全栈开发模拟器</span>
         </a>
         <div class="nav-links">
           <a href="/console.html">操作台</a>
@@ -53,7 +53,7 @@
             <p class="eyebrow">DATABASE SQL SANDBOX</p>
             <h1>在浏览器里练习多种数据库 SQL，像 IDE 一样立即看到结果。</h1>
             <p class="hero-text">
-              面向教学、面试准备和产品演示的 SQL 数据库模拟器。覆盖 MySQL、PostgreSQL、SQLite、MariaDB、SQL Server 和 Oracle 的常见 SQL 学习场景，所有操作都保存在浏览器本地状态中。
+              面向教学、面试准备和产品演示的前后端全栈开发模拟器。覆盖 MySQL、PostgreSQL、SQLite、MariaDB、SQL Server、Oracle 和 JavaScript 学习场景，所有操作都保存在浏览器本地状态中。
             </p>
             <div class="hero-actions">
               <a class="primary-button" href="/console.html">
@@ -85,11 +85,11 @@
               <span>Query 1.sql</span>
               <small>Ctrl Enter</small>
             </div>
-            <pre class="mini-editor" aria-label="SQL 代码预览"><code><span class="line-no">1</span><span class="sql-keyword">SELECT</span> id, status, total_amount
-<span class="line-no">2</span><span class="sql-keyword">FROM</span> orders
-<span class="line-no">3</span><span class="sql-keyword">WHERE</span> status <span class="sql-operator">=</span> <span class="sql-string">'paid'</span>
-<span class="line-no">4</span><span class="sql-keyword">ORDER BY</span> id <span class="sql-keyword">DESC</span>
-<span class="line-no">5</span><span class="sql-keyword">LIMIT</span> <span class="sql-number">5</span>;</code></pre>
+            <pre class="mini-editor" aria-label="SQL 代码预览"><code><span class="mini-code-line" style="--line-delay: 0ms"><span class="line-no">1</span><span class="sql-keyword">SELECT</span> id, status, total_amount</span>
+<span class="mini-code-line" style="--line-delay: 180ms"><span class="line-no">2</span><span class="sql-keyword">FROM</span> orders</span>
+<span class="mini-code-line" style="--line-delay: 360ms"><span class="line-no">3</span><span class="sql-keyword">WHERE</span> status <span class="sql-operator">=</span> <span class="sql-string">'paid'</span></span>
+<span class="mini-code-line" style="--line-delay: 540ms"><span class="line-no">4</span><span class="sql-keyword">ORDER BY</span> id <span class="sql-keyword">DESC</span></span>
+<span class="mini-code-line" style="--line-delay: 720ms"><span class="line-no">5</span><span class="sql-keyword">LIMIT</span> <span class="sql-number">5</span>;<span class="mini-caret" aria-hidden="true"></span></span></code></pre>
             <div class="mini-result">
               <div class="mini-result-top">
                 <span>执行结果</span>
@@ -259,7 +259,7 @@
 
     <footer class="footer">
       <div class="container footer-inner">
-        <span>SQL Database Simulator</span>
+        <span>前后端全栈开发模拟器</span>
         <div class="version-widget" data-version-widget>
           <span data-version-status>正在检测版本...</span>
           <button data-update-button type="button" hidden>立即更新</button>

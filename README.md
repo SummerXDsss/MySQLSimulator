@@ -1,4 +1,4 @@
-# SQL Database Simulator
+# 前后端全栈开发模拟器
 
 ## Docker 运行
 
@@ -25,6 +25,8 @@ http://服务器IP:3000/js.hsml
 部署前建议修改 `docker-compose.yml` 里的 `SQLM_SECRET` 和 `WEB_UPDATE_TOKEN`。前者用于 `.sqlm` 文件加密和解密，后者用于保护网页更新接口。如站点在 Nginx / CDN 后面运行，再把 `TRUST_PROXY` 改成 `true`，这样后台日志会记录代理转发的真实访问 IP。
 
 网页底部会检测 GitHub 最新版本。发现更新后可点击“立即更新”，并输入服务器更新令牌：
+
+网页底部的“更新历史”可以分页查看软件迭代记录，包括更新时间、版本号、短 Hash 和 Commit 内容。
 
 ```yaml
 WEB_UPDATE_ENABLED: "true"

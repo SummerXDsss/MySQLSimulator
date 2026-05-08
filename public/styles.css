@@ -180,6 +180,45 @@ button {
   gap: 12px;
 }
 
+.nav-repo-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-mid);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nav-repo-meta[hidden] {
+  display: none;
+}
+
+.nav-repo-meta:hover {
+  border-color: var(--border-strong);
+  color: var(--primary);
+}
+
+.nav-repo-meta svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.nav-repo-meta span,
+.nav-repo-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nav-tool-button {
   display: inline-flex;
   align-items: center;
@@ -571,6 +610,24 @@ h3 {
   white-space: pre;
 }
 
+.mini-code-line {
+  display: block;
+  opacity: 0;
+  transform: translateY(6px);
+  animation: miniLineIn 360ms ease forwards;
+  animation-delay: var(--line-delay, 0ms);
+}
+
+.mini-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.25em;
+  margin-left: 2px;
+  vertical-align: -0.22em;
+  background: var(--primary);
+  animation: miniCaretBlink 1s steps(1, end) infinite;
+}
+
 .line-no {
   display: inline-block;
   width: 24px;
@@ -583,6 +640,10 @@ h3 {
 .mini-result {
   padding: 0;
   background: var(--surface);
+  opacity: 0;
+  transform: translateY(8px);
+  animation: miniResultPop 420ms ease forwards;
+  animation-delay: 1040ms;
 }
 
 .mini-result-top {
@@ -618,6 +679,21 @@ h3 {
   border-bottom: 1px solid var(--border);
   color: var(--text-mid);
   font-size: 13px;
+  opacity: 0;
+  transform: translateY(6px);
+  animation: miniRowIn 320ms ease forwards;
+}
+
+.mini-row:nth-child(1) {
+  animation-delay: 1260ms;
+}
+
+.mini-row:nth-child(2) {
+  animation-delay: 1400ms;
+}
+
+.mini-row:nth-child(3) {
+  animation-delay: 1540ms;
 }
 
 .mini-head {
@@ -644,6 +720,42 @@ h3 {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
+  opacity: 0;
+  transform: translateY(5px);
+  animation: miniRowIn 320ms ease forwards;
+  animation-delay: 1720ms;
+}
+
+@keyframes miniLineIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes miniCaretBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes miniResultPop {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes miniRowIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .proof-bar {
@@ -2348,6 +2460,91 @@ h3 {
   font-size: 28px;
 }
 
+.update-history-card {
+  width: min(760px, 100%);
+}
+
+.history-meta {
+  margin: -8px 0 16px;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.history-row,
+.history-commit {
+  min-width: 0;
+}
+
+.history-row span,
+.history-commit span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.history-row strong,
+.history-row a {
+  display: block;
+  overflow: hidden;
+  color: var(--text-dark);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-row a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.history-commit {
+  grid-column: 1 / -1;
+}
+
+.history-commit p {
+  margin: 0;
+  color: var(--text-mid);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.history-empty {
+  padding: 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  color: var(--text-light);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.history-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 .onboarding-steps {
   display: grid;
   gap: 12px;
@@ -2772,6 +2969,10 @@ h3 {
     margin-left: auto;
   }
 
+  .nav-repo-meta {
+    max-width: 128px;
+  }
+
   .section {
     padding: 80px 0;
   }
@@ -2883,6 +3084,14 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .history-item {
+    grid-template-columns: 1fr;
+  }
+
+  .history-pagination {
+    flex-direction: column;
+  }
+
   .visual-controls {
     width: 100%;
   }
@@ -2934,6 +3143,7 @@ h3 {
   }
 
   .nav-tool-button span,
+  .nav-repo-meta span,
   .title-meta {
     display: none;
   }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JavaScript 学习工具</title>
+    <title>JavaScript 学习工具 - 前后端全栈开发模拟器</title>
     <meta name="description" content="只识别并执行 JavaScript 代码内容的安全学习工具。" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -22,9 +22,9 @@
   <body class="console-page js-page">
     <nav class="nav">
       <div class="container nav-inner">
-        <a class="brand" href="/" aria-label="SQL 数据库模拟器">
-          <span class="brand-mark">JS</span>
-          <span>JavaScript 学习工具</span>
+        <a class="brand" href="/" aria-label="前后端全栈开发模拟器">
+          <span class="brand-mark">DEV</span>
+          <span>前后端全栈开发模拟器</span>
         </a>
         <div class="nav-links">
           <a href="/">介绍</a>
@@ -173,7 +173,7 @@
 
     <footer class="footer console-footer">
       <div class="container footer-inner">
-        <span>JavaScript Learning Sandbox</span>
+        <span>前后端全栈开发模拟器</span>
         <div class="version-widget" data-version-widget>
           <span data-version-status>正在检测版本...</span>
           <button data-update-button type="button" hidden>立即更新</button>

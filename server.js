@@ -28,6 +28,7 @@ const WEB_UPDATE_TOKEN = process.env.WEB_UPDATE_TOKEN || process.env.UPDATE_TOKE
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 const PUBLIC_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_BASE_URL || "");
 const VERSION_CACHE_MS = 60 * 1000;
+const HISTORY_CACHE_MS = 5 * 60 * 1000;
 const SHARE_TTL_MS = 60 * 60 * 1000;
 const SHARE_SQL_MAX_BYTES = 128 * 1024;
 const SHARE_JS_MAX_BYTES = 128 * 1024;
@@ -253,6 +254,8 @@ function createInitialState() {
 
 let state = createInitialState();
 let versionCache = null;
+let updateTagCache = null;
+const updateHistoryCache = new Map();
 
 function getStateSnapshot() {
   return clone({
@@ -733,7 +736,7 @@ function readCurrentRevision() {
   return "local";
 }
 
-function requestJson(url) {
+function requestJsonWithMeta(url) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, {
       headers: {
@@ -751,7 +754,10 @@ function requestJson(url) {
           return;
         }
         try {
-          resolve(JSON.parse(body));
+          resolve({
+            data: JSON.parse(body),
+            headers: incoming.headers
+          });
         } catch (error) {
           reject(error);
         }
@@ -762,6 +768,11 @@ function requestJson(url) {
     });
     request.on("error", reject);
   });
+}
+
+async function requestJson(url) {
+  const response = await requestJsonWithMeta(url);
+  return response.data;
 }
 
 function requestText(url) {
@@ -836,6 +847,115 @@ async function getLatestVersionInfo(force = false) {
   }
 
   versionCache = { checkedAt: now, payload };
+  return payload;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function firstCommitLine(message) {
+  return String(message || "").split("\n").find((line) => line.trim())?.trim() || "No commit message";
+}
+
+function parseGitHubLinkHeader(linkHeader) {
+  const links = {};
+  String(linkHeader || "").split(",").forEach((part) => {
+    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
+    if (!match) return;
+    links[match[2]] = match[1];
+  });
+  return links;
+}
+
+function getPageFromUrl(value) {
+  try {
+    return Number.parseInt(new URL(value).searchParams.get("page"), 10);
+  } catch {
+    return 0;
+  }
+}
+
+async function getUpdateTagMap(force = false) {
+  const now = Date.now();
+  if (!force && updateTagCache && now - updateTagCache.checkedAt < HISTORY_CACHE_MS) {
+    return updateTagCache.map;
+  }
+
+  const refs = await requestJson(`https://api.github.com/repos/${APP_REPO}/git/matching-refs/tags/v`);
+  const tagMap = new Map();
+  await Promise.all((Array.isArray(refs) ? refs : []).map(async (ref) => {
+    const tagName = String(ref.ref || "").replace(/^refs\/tags\//, "");
+    if (!tagName) return;
+    let commitSha = ref.object?.sha || "";
+    if (ref.object?.type === "tag" && ref.object?.url) {
+      try {
+        const tagObject = await requestJson(ref.object.url);
+        commitSha = tagObject.object?.sha || commitSha;
+      } catch {
+        // Keep the tag object SHA as a fallback.
+      }
+    }
+    if (!commitSha) return;
+    const versions = tagMap.get(commitSha) || [];
+    versions.push(tagName);
+    tagMap.set(commitSha, versions);
+  }));
+
+  updateTagCache = { checkedAt: now, map: tagMap };
+  return tagMap;
+}
+
+async function getUpdateHistory(page, pageSize, force = false) {
+  const currentPage = clampNumber(page, 1, 999, 1);
+  const currentPageSize = clampNumber(pageSize, 5, 30, 8);
+  const cacheKey = `${currentPage}:${currentPageSize}`;
+  const now = Date.now();
+  const cached = updateHistoryCache.get(cacheKey);
+  if (!force && cached && now - cached.checkedAt < HISTORY_CACHE_MS) {
+    return cached.payload;
+  }
+
+  const [commitsResponse, tagMap] = await Promise.all([
+    requestJsonWithMeta(`https://api.github.com/repos/${APP_REPO}/commits?sha=${encodeURIComponent(APP_UPDATE_BRANCH)}&per_page=${currentPageSize}&page=${currentPage}`),
+    getUpdateTagMap(force)
+  ]);
+
+  const commits = commitsResponse.data;
+  const list = Array.isArray(commits) ? commits : [];
+  const links = parseGitHubLinkHeader(commitsResponse.headers?.link);
+  const lastPage = Math.max(currentPage, getPageFromUrl(links.last) || currentPage);
+  const hasNext = Boolean(links.next) || currentPage < lastPage;
+  const items = list.map((commit) => {
+    const sha = commit.sha || "";
+    const tags = tagMap.get(sha) || [];
+    return {
+      updatedAt: commit.commit?.committer?.date || commit.commit?.author?.date || "",
+      version: tags.length ? tags.join(", ") : "未标记",
+      shortHash: sha.slice(0, 7),
+      hash: sha,
+      title: firstCommitLine(commit.commit?.message),
+      message: String(commit.commit?.message || "").trim(),
+      author: commit.commit?.author?.name || commit.author?.login || "unknown",
+      url: commit.html_url || `https://github.com/${APP_REPO}/commit/${sha}`
+    };
+  });
+
+  const payload = {
+    ok: true,
+    repo: APP_REPO,
+    branch: APP_UPDATE_BRANCH,
+    page: currentPage,
+    pageSize: currentPageSize,
+    totalPages: lastPage,
+    hasPrev: currentPage > 1,
+    hasNext,
+    checkedAt: new Date().toISOString(),
+    items
+  };
+  updateHistoryCache.set(cacheKey, { checkedAt: now, payload });
   return payload;
 }
 
@@ -1828,6 +1948,20 @@ function getSchemaSummary() {
 async function handleApi(request, response, pathname) {
   if (request.method === "GET" && pathname === "/api/version") {
     jsonResponse(response, 200, decorateVersionForRequest(await getLatestVersionInfo()));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/update-history") {
+    try {
+      const params = new URL(request.url, `http://${request.headers.host}`).searchParams;
+      jsonResponse(response, 200, await getUpdateHistory(params.get("page"), params.get("pageSize")));
+    } catch (error) {
+      jsonResponse(response, 502, {
+        ok: false,
+        message: "暂时无法获取更新历史",
+        detail: error.message
+      });
+    }
     return;
   }
 
