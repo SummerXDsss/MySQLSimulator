@@ -878,6 +878,10 @@ function getPageFromUrl(value) {
   }
 }
 
+function isUpdateHistoryPath(pathname) {
+  return ["/api/update-history", "/api/update/history", "/api/history", "/api/changelog"].includes(pathname);
+}
+
 async function getUpdateTagMap(force = false) {
   const now = Date.now();
   if (!force && updateTagCache && now - updateTagCache.checkedAt < HISTORY_CACHE_MS) {
@@ -1951,7 +1955,7 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
-  if (request.method === "GET" && pathname === "/api/update-history") {
+  if (request.method === "GET" && isUpdateHistoryPath(pathname)) {
     try {
       const params = new URL(request.url, `http://${request.headers.host}`).searchParams;
       jsonResponse(response, 200, await getUpdateHistory(params.get("page"), params.get("pageSize")));
@@ -2339,13 +2343,14 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
-  jsonResponse(response, 404, { ok: false, message: "API not found" });
+  jsonResponse(response, 404, { ok: false, message: "API 未找到" });
 }
 
 function createServer() {
   return http.createServer(async (request, response) => {
     try {
-      const { pathname } = new URL(request.url, `http://${request.headers.host}`);
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
       if (pathname.startsWith("/api/")) {
         await handleApi(request, response, pathname);
         return;

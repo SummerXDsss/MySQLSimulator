@@ -129,11 +129,24 @@ function closeHistoryOverlay() {
   if (historyOverlay) historyOverlay.hidden = true;
 }
 
-async function requestUpdateHistory(page) {
-  const response = await fetch(`/api/update-history?page=${encodeURIComponent(page)}&pageSize=${HISTORY_PAGE_SIZE}`, { cache: "no-store" });
+async function requestUpdateHistoryFrom(path, page) {
+  const response = await fetch(`${path}?page=${encodeURIComponent(page)}&pageSize=${HISTORY_PAGE_SIZE}`, { cache: "no-store" });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.message || "更新历史加载失败");
   return payload;
+}
+
+async function requestUpdateHistory(page) {
+  try {
+    return await requestUpdateHistoryFrom("/api/update-history", page);
+  } catch (error) {
+    if (!/API\s*(not found|未找到)/i.test(error.message || "")) throw error;
+    try {
+      return await requestUpdateHistoryFrom("/api/history", page);
+    } catch {
+      throw new Error("更新历史接口未启用，请先在线更新到最新版本或重启后端服务。");
+    }
+  }
 }
 
 function renderUpdateHistory(payload) {
