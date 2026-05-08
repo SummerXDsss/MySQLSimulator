@@ -176,6 +176,20 @@ function highlightHtmlJavaScript(source) {
   return html || "\n";
 }
 
+function highlightEditorSource(source) {
+  const text = String(source ?? "");
+  if (jsPrefs.interpreter === "nodejs") {
+    return highlightJavaScript(text);
+  }
+  if (/<script\b[^>]*>[\s\S]*?<\/script>/i.test(text)) {
+    return highlightHtmlJavaScript(text);
+  }
+  if (!/<\/?[a-z][\s\S]*>/i.test(text)) {
+    return highlightJavaScript(text);
+  }
+  return escapeHtml(text) || "\n";
+}
+
 function syncJsHighlightScroll() {
   if (!jsHighlightCode) return;
   if (jsLineNumbers) jsLineNumbers.scrollTop = jsEditor.scrollTop;
@@ -221,6 +235,7 @@ function applyInterpreterMode() {
     jsInterpreterBadge.innerHTML = `<i data-lucide="cpu"></i> ${interpreter === "nodejs" ? "NodeJS 解释器" : "HTML JS 解释器"}`;
     window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
   }
+  updateJsHighlight();
   refreshRiskState({ showSuggestions: false });
 }
 
@@ -327,7 +342,7 @@ function refreshRiskState(options = {}) {
 
 function updateJsHighlight() {
   if (!jsHighlightCode) return;
-  jsHighlightCode.innerHTML = `${highlightHtmlJavaScript(jsEditor.value)}\n`;
+  jsHighlightCode.innerHTML = `${highlightEditorSource(jsEditor.value)}\n`;
   updateJsLineNumbers();
   syncJsHighlightScroll();
 }
