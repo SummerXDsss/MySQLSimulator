@@ -967,13 +967,8 @@ function decorateVersionForRequest(version) {
   const payload = {
     ...version,
     updateAuthRequired: Boolean(WEB_UPDATE_TOKEN),
-    updateEnabled: Boolean(WEB_UPDATE_ENABLED && (WEB_UPDATE_PUBLIC || WEB_UPDATE_TOKEN))
+    updateEnabled: Boolean(WEB_UPDATE_ENABLED)
   };
-  if (WEB_UPDATE_ENABLED && !payload.updateEnabled) {
-    payload.message = payload.updateAvailable
-      ? "发现新版本，但服务器未配置更新权限"
-      : payload.message;
-  }
   return payload;
 }
 
@@ -992,7 +987,7 @@ function authorizeWebUpdate(request, payload = {}) {
     return { ok: true };
   }
   if (!WEB_UPDATE_TOKEN) {
-    return { ok: false, status: 403, message: "服务器未配置更新令牌" };
+    return { ok: true };
   }
   const providedToken = request.headers["x-update-token"] || payload.updateToken || "";
   if (!timingSafeEqualText(providedToken, WEB_UPDATE_TOKEN)) {

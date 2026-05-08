@@ -2,7 +2,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-ARG APP_VERSION=2.0.3
+ARG APP_VERSION=2.1.1
 ARG APP_REVISION=local
 
 ENV NODE_ENV=production
