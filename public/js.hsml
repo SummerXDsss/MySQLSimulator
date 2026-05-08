@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JavaScript 学习工具</title>
+    <meta name="description" content="只识别并执行 JavaScript 代码内容的安全学习工具。" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      const savedTheme = localStorage.getItem("mysql-simulator-theme");
+      if (savedTheme) {
+        document.documentElement.dataset.theme = savedTheme;
+      } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="console-page js-page">
+    <nav class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="/" aria-label="SQL 数据库模拟器">
+          <span class="brand-mark">JS</span>
+          <span>JavaScript 学习工具</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">介绍</a>
+          <a href="/console.html">SQL 操作台</a>
+          <a href="#riskPanel">风险控制</a>
+        </div>
+        <div class="nav-tools">
+          <button id="themeToggle" class="nav-tool-button" type="button" aria-label="切换深色模式">
+            <i data-lucide="moon"></i>
+            <span>深色模式</span>
+          </button>
+          <div class="settings-wrap">
+            <button id="jsSettingsToggle" class="nav-tool-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="jsSettingsPanel">
+              <i data-lucide="settings"></i>
+              <span>设置</span>
+            </button>
+            <div id="jsSettingsPanel" class="settings-panel" role="dialog" aria-label="JavaScript 工具设置" hidden>
+              <div class="settings-heading">
+                <strong>运行方案</strong>
+                <button id="jsSettingsClose" class="icon-button" type="button" aria-label="关闭设置">
+                  <i data-lucide="x"></i>
+                </button>
+              </div>
+              <label class="settings-field">
+                <span>解释器</span>
+                <select id="jsInterpreterSelect">
+                  <option value="html-js">HTML JS 解释器</option>
+                  <option value="nodejs">NodeJS 解释器</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <a class="nav-action" href="/">
+            返回首页
+            <i data-lucide="arrow-right"></i>
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="console-app">
+      <section class="console-workbench">
+        <div class="container simulator-container">
+          <div class="console-titlebar">
+            <div>
+              <p class="eyebrow">JAVASCRIPT SANDBOX</p>
+              <h1>HTMLJavaScript 学习工具</h1>
+            </div>
+            <div class="title-meta">
+              <span><i data-lucide="shield-check"></i> Worker 沙箱</span>
+              <span><i data-lucide="scan-search"></i> 只执行 JS 内容</span>
+              <span id="jsInterpreterBadge"><i data-lucide="cpu"></i> HTML JS 解释器</span>
+              <span><i data-lucide="timer-reset"></i> 2 秒超时</span>
+            </div>
+          </div>
+
+          <div class="js-lab-shell">
+            <section class="js-editor-panel" aria-label="JavaScript 编辑器">
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <span class="status-dot"></span>
+                  <span id="jsStatus">等待执行</span>
+                </div>
+                <div class="toolbar-actions">
+                  <div class="tool-group">
+                    <button id="jsExampleBtn" class="tool-button" type="button">
+                      <i data-lucide="book-open"></i>
+                      <span>载入示例</span>
+                    </button>
+                    <button id="jsFormatBtn" class="tool-button" type="button">
+                      <i data-lucide="wand-2"></i>
+                      <span>格式化</span>
+                    </button>
+                    <button id="jsClearBtn" class="tool-button" type="button">
+                      <i data-lucide="eraser"></i>
+                      <span>清空</span>
+                    </button>
+                  </div>
+                  <div class="tool-group">
+                    <button id="jsImportBtn" class="tool-button" type="button">
+                      <i data-lucide="upload"></i>
+                      <span>导入</span>
+                    </button>
+                    <button id="jsExportBtn" class="tool-button" type="button">
+                      <i data-lucide="download"></i>
+                      <span>导出</span>
+                    </button>
+                    <button id="jsShareBtn" class="tool-button" type="button">
+                      <i data-lucide="share-2"></i>
+                      <span>分享</span>
+                    </button>
+                  </div>
+                  <button id="jsRunBtn" class="run-button" type="button">
+                    <i data-lucide="play"></i>
+                    <span>执行 JS</span>
+                    <small>Ctrl Enter</small>
+                  </button>
+                  <input id="jsFileInput" type="file" accept=".js,.mjs,.html,.htm,.txt,text/javascript,text/html,text/plain" hidden />
+                </div>
+              </div>
+
+              <div class="js-editor-card">
+                <div class="editor-header">
+                  <div>
+                    <strong>代码输入</strong>
+                    <span>可粘贴 HTML，工具只提取 script 中的 JavaScript</span>
+                  </div>
+                  <span id="jsExtractStatus">JavaScript only</span>
+                </div>
+                <div class="js-editor-body">
+                  <div class="line-numbers js-line-numbers" id="jsLineNumbers">1</div>
+                  <div class="js-editor-stack">
+                    <pre id="jsHighlightLayer" aria-hidden="true"><code id="jsHighlightCode"></code></pre>
+                    <textarea id="jsEditor" class="js-code-editor" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="JavaScript 代码编辑器"></textarea>
+                    <div id="jsSuggestPanel" class="suggest-panel js-suggest-panel" hidden>
+                      <div id="jsSuggestionList"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="js-result-panel">
+              <section class="side-section" id="riskPanel">
+                <div class="panel-title">
+                  <i data-lucide="shield-alert"></i>
+                  风险控制
+                </div>
+                <div id="jsRiskList" class="js-risk-list"></div>
+              </section>
+
+              <section class="side-section">
+                <div class="panel-title">
+                  <span><i data-lucide="terminal-square"></i> 执行结果</span>
+                  <button id="jsClearOutputBtn" class="icon-button" type="button" aria-label="清除执行结果">
+                    <i data-lucide="trash-2"></i>
+                  </button>
+                </div>
+                <div id="jsOutput" class="js-output"></div>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer console-footer">
+      <div class="container footer-inner">
+        <span>JavaScript Learning Sandbox</span>
+        <div class="version-widget" data-version-widget>
+          <span data-version-status>正在检测版本...</span>
+          <button data-update-button type="button" hidden>立即更新</button>
+        </div>
+      </div>
+    </footer>
+
+    <div id="jsShareWatermark" class="share-watermark" hidden></div>
+
+    <div id="jsShareOverlay" class="onboarding-overlay" hidden>
+      <section class="onboarding-card share-card" role="dialog" aria-modal="true" aria-labelledby="jsShareTitle">
+        <button id="jsShareClose" class="icon-button onboarding-close" type="button" aria-label="关闭分享">
+          <i data-lucide="x"></i>
+        </button>
+        <p class="eyebrow">SHARE</p>
+        <h2 id="jsShareTitle">分享当前代码</h2>
+        <div class="share-legal">
+          <strong>免责声明</strong>
+          <p>分享链接仅保存当前代码文本，有效期 60 分钟。请勿分享真实密钥、生产数据、个人敏感信息或可造成风险的代码片段。</p>
+          <strong>用户协议</strong>
+          <p>用户确认其有权分享该代码，并自行承担链接传播、内容合规和敏感信息泄露造成的风险。SQLSimulator 仅提供短效文本传递和学习模拟能力。</p>
+        </div>
+        <div id="jsShareRiskList" class="share-risk-list"></div>
+        <label class="share-agree">
+          <input id="jsShareAgree" type="checkbox" />
+          <span>我已阅读并同意免责声明和用户协议</span>
+        </label>
+        <div class="share-link-row">
+          <input id="jsShareLinkInput" type="text" readonly placeholder="创建后显示短效链接" />
+          <button id="jsCopyShareLinkBtn" class="tool-button" type="button">
+            <i data-lucide="copy"></i>
+            复制
+          </button>
+        </div>
+        <div class="onboarding-actions">
+          <button id="jsShareCancel" class="ghost-button" type="button">取消</button>
+          <button id="jsCreateShareLinkBtn" class="primary-button" type="button">
+            <i data-lucide="link"></i>
+            创建 60 分钟链接
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="/theme.js"></script>
+    <script src="/js-tool.js"></script>
+    <script src="/version.js"></script>
+  </body>
+</html>

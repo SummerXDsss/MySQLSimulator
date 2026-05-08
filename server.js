@@ -30,12 +30,16 @@ const PUBLIC_BASE_URL = normalizeBaseUrl(process.env.PUBLIC_BASE_URL || "");
 const VERSION_CACHE_MS = 60 * 1000;
 const SHARE_TTL_MS = 60 * 60 * 1000;
 const SHARE_SQL_MAX_BYTES = 128 * 1024;
+const SHARE_JS_MAX_BYTES = 128 * 1024;
 const SHARE_AUDIT_LOG = path.join(APP_DIR, "share-audit.log");
 
 const sharedSqlStore = new Map();
+const sharedJsStore = new Map();
 
 const SHARE_DISCLAIMER = "分享链接仅保存 SQL 文本，不保存模拟数据库状态；链接有效期 60 分钟，请勿分享真实密码、密钥、生产数据或个人敏感信息。";
 const SHARE_TERMS = "用户确认其有权分享该 SQL 文本，并自行承担由链接传播、内容合规和敏感信息泄露造成的风险。SQLSimulator 仅提供短效文本传递和模拟执行能力，不对 SQL 内容的真实性、安全性或执行后果负责。";
+const JS_SHARE_DISCLAIMER = "分享链接仅保存 JavaScript 学习代码文本；链接有效期 60 分钟，请勿分享真实密钥、生产数据、个人敏感信息或可造成风险的代码片段。";
+const JS_SHARE_TERMS = "用户确认其有权分享该代码，并自行承担由链接传播、内容合规和敏感信息泄露造成的风险。SQLSimulator 仅提供短效文本传递和学习模拟能力。";
 
 function compareVersions(left, right) {
   const cleanLeft = String(left || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -52,6 +56,7 @@ function compareVersions(left, right) {
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
+  ".hsml": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
@@ -71,6 +76,7 @@ const SECURITY_HEADERS = {
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data:",
     "connect-src 'self'",
+    "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'"
@@ -409,11 +415,115 @@ function analyzeSharedSql(sql) {
   };
 }
 
+function extractSharedJavaScript(source, interpreter = "html-js") {
+  const text = String(source ?? "");
+  const warnings = [];
+  const scriptPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  const scripts = [];
+  let match;
+
+  if (interpreter === "nodejs" && /<\/?[a-z][\s\S]*>/i.test(text)) {
+    return {
+      code: "",
+      warnings,
+      errors: ["NodeJS 解释器只接受 JavaScript 代码内容"]
+    };
+  }
+
+  while ((match = scriptPattern.exec(text)) !== null) {
+    const attrs = match[1] || "";
+    const typeMatch = attrs.match(/\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const scriptType = String(typeMatch?.[1] || typeMatch?.[2] || typeMatch?.[3] || "").trim().toLowerCase();
+    const javascriptTypes = new Set(["", "module", "text/javascript", "application/javascript", "application/ecmascript", "text/ecmascript"]);
+    if (!javascriptTypes.has(scriptType)) {
+      warnings.push(`已忽略非 JavaScript 类型 script：${scriptType}`);
+      continue;
+    }
+    if (/\bsrc\s*=/i.test(attrs)) {
+      warnings.push("已忽略外部 script src，工具不会加载远程脚本");
+      continue;
+    }
+    scripts.push(match[2].trim());
+  }
+
+  if (scripts.length) {
+    warnings.push("已忽略 HTML/CSS，只执行 script 中的 JavaScript");
+    return { code: scripts.join("\n\n"), warnings, errors: [] };
+  }
+
+  if (/<\/?[a-z][\s\S]*>/i.test(text)) {
+    return {
+      code: "",
+      warnings,
+      errors: ["未识别到可执行的 JavaScript，请把代码放到 <script> 中"]
+    };
+  }
+
+  return { code: text.trim(), warnings, errors: [] };
+}
+
+function analyzeSharedJs(code, interpreter = "html-js") {
+  const text = String(code ?? "");
+  const extracted = extractSharedJavaScript(text, interpreter);
+  const js = extracted.code;
+  const byteLength = Buffer.byteLength(text, "utf8");
+  const errors = [...(extracted.errors || [])];
+  const warnings = [...(extracted.warnings || [])];
+
+  if (!text.trim()) errors.push("JavaScript 内容不能为空");
+  if (byteLength > SHARE_JS_MAX_BYTES) {
+    errors.push(`JavaScript 文件超过 ${Math.round(SHARE_JS_MAX_BYTES / 1024)}KB 限制`);
+  }
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) {
+    errors.push("检测到非法控制字符，请删除后再分享");
+  }
+  if (/[\u202A-\u202E\u2066-\u2069]/.test(text)) {
+    warnings.push("检测到 Unicode 方向控制字符，可能造成代码显示混淆");
+  }
+  if (/[\u200B-\u200F\uFEFF]/.test(text)) {
+    warnings.push("检测到零宽字符，可能影响代码审阅");
+  }
+
+  const blockedRules = [
+    [/\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|Request|Response|Headers|navigator)\b/i, "禁止网络请求相关 API"],
+    [/\b(showOpenFilePicker|showSaveFilePicker|showDirectoryPicker|FileReader|FileList|FileSystem|FileSystemHandle|FileSystemFileHandle|FileSystemDirectoryHandle|FileSystemWritableFileStream|createWritable|getFile|removeEntry|Blob|FormData|createObjectURL|revokeObjectURL|download|clipboard|ClipboardItem|WritableStream)\b/i, "禁止文件读取、文件修改、下载或剪贴板相关 API"],
+    [/\b(localStorage|sessionStorage|indexedDB|cookie|caches|CacheStorage)\b/i, "禁止读取或写入浏览器本地存储"],
+    [/\beval\s*\(|\bnew\s+Function\b|\bFunction\s*\(|\bAsyncFunction\b|\bGeneratorFunction\b|\bimportScripts\b|\bimport\s*(?:\(|[\w{*])|\bexport\s+(?:default|const|let|var|function|class|\{)/, "禁止动态执行、导入或导出外部代码"],
+    [/\b(Worker|SharedWorker|ServiceWorker|BroadcastChannel|MessageChannel)\b/i, "禁止创建后台线程、消息通道或广播通道"],
+    [/\b(top|parent|opener|frames|location|history)\b/i, "禁止访问窗口跳转或父级上下文"],
+    [/\bdocument\s*\.\s*(write|createElement|body|head|cookie)\b/i, "禁止操作页面 DOM 或写入 document"],
+    [/\bset(?:Timeout|Interval)\s*\(\s*['"`]/i, "禁止字符串形式的定时执行"],
+    [/\.\s*constructor\b|\[\s*["']constructor["']\s*\]|\bconstructor\s*\.\s*constructor\b/i, "禁止构造器逃逸写法"],
+    [/\b(__sqlsimPost__|__sqlsimBlocked__|__sqlsimSend__|__sqlsimFormat__|__sqlsimMaxOutput__)\b/i, "禁止访问沙箱内部变量"],
+    [/\b(?:globalThis|self)\s*\.\s*(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\b|\b(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\s*\(/i, "禁止直接操作 Worker 全局通信能力"]
+  ];
+
+  blockedRules.forEach(([pattern, message]) => {
+    if (pattern.test(js)) errors.push(message);
+  });
+
+  if (/\bwhile\s*\(\s*true\s*\)|\bfor\s*\(\s*;\s*;\s*\)/i.test(js)) {
+    warnings.push("检测到可能的无限循环，运行会在 2 秒后强制终止");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    byteLength
+  };
+}
+
 function cleanupExpiredShares() {
   const now = Date.now();
   for (const [token, item] of sharedSqlStore.entries()) {
     if (item.expiresAt <= now) {
       sharedSqlStore.delete(token);
+    }
+  }
+  for (const [token, item] of sharedJsStore.entries()) {
+    if (item.expiresAt <= now) {
+      sharedJsStore.delete(token);
     }
   }
 }
@@ -575,6 +685,8 @@ function serveStatic(request, response) {
       ? "/console.html"
       : /^\/share\/[A-Za-z0-9_-]{16,}$/.test(requestedPath)
         ? "/console.html"
+      : /^\/js-share\/[A-Za-z0-9_-]{16,}$/.test(requestedPath)
+        ? "/js.hsml"
       : requestedPath;
   const filePath = path.normalize(path.join(PUBLIC_DIR, safePath.replace(/^\/+/, "")));
   const relativePath = path.relative(PUBLIC_DIR, filePath);
@@ -1913,6 +2025,107 @@ async function handleApi(request, response, pathname) {
       warnings: item.warnings,
       disclaimer: SHARE_DISCLAIMER,
       terms: SHARE_TERMS
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/share/js") {
+    try {
+      const payload = JSON.parse(await readBody(request) || "{}");
+      if (!payload.acceptedTerms) {
+        jsonResponse(response, 400, {
+          ok: false,
+          message: "请先确认免责声明和用户协议"
+        });
+        return;
+      }
+
+      const code = String(payload.code || "");
+      const interpreter = payload.interpreter === "nodejs" ? "nodejs" : "html-js";
+      const analysis = analyzeSharedJs(code, interpreter);
+      if (!analysis.ok) {
+        writeShareAudit("share-js.reject", request, {
+          reason: analysis.errors.join("; "),
+          byteLength: analysis.byteLength
+        });
+        jsonResponse(response, 400, {
+          ok: false,
+          message: "JavaScript 内容未通过安全检查",
+          analysis,
+          disclaimer: JS_SHARE_DISCLAIMER,
+          terms: JS_SHARE_TERMS
+        });
+        return;
+      }
+
+      cleanupExpiredShares();
+      const token = crypto.randomBytes(24).toString("base64url");
+      const now = Date.now();
+      const ip = getClientIp(request);
+      const item = {
+        token,
+        code,
+        interpreter,
+        createdAt: now,
+        expiresAt: now + SHARE_TTL_MS,
+        creatorIp: ip,
+        creatorMaskedIp: maskIpAddress(ip),
+        warnings: analysis.warnings
+      };
+      sharedJsStore.set(token, item);
+      writeShareAudit("share-js.create", request, {
+        token,
+        maskedIp: item.creatorMaskedIp,
+        byteLength: analysis.byteLength,
+        expiresAt: new Date(item.expiresAt).toISOString(),
+        warnings: analysis.warnings
+      });
+      jsonResponse(response, 200, {
+        ok: true,
+        token,
+        url: `${getRequestOrigin(request)}/js-share/${token}`,
+        expiresAt: new Date(item.expiresAt).toISOString(),
+        ttlSeconds: Math.floor(SHARE_TTL_MS / 1000),
+        sharedByMaskedIp: item.creatorMaskedIp,
+        analysis,
+        disclaimer: JS_SHARE_DISCLAIMER,
+        terms: JS_SHARE_TERMS
+      });
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message });
+    }
+    return;
+  }
+
+  const jsShareMatch = pathname.match(/^\/api\/share\/js\/([A-Za-z0-9_-]{16,})$/);
+  if (request.method === "GET" && jsShareMatch) {
+    cleanupExpiredShares();
+    const token = jsShareMatch[1];
+    const item = sharedJsStore.get(token);
+    if (!item) {
+      writeShareAudit("share-js.miss", request, { token });
+      jsonResponse(response, 404, {
+        ok: false,
+        message: "分享链接不存在或已过期"
+      });
+      return;
+    }
+    writeShareAudit("share-js.open", request, {
+      token,
+      creatorIp: item.creatorIp,
+      creatorMaskedIp: item.creatorMaskedIp
+    });
+    jsonResponse(response, 200, {
+      ok: true,
+      token,
+      code: item.code,
+      interpreter: item.interpreter,
+      createdAt: new Date(item.createdAt).toISOString(),
+      expiresAt: new Date(item.expiresAt).toISOString(),
+      sharedByMaskedIp: item.creatorMaskedIp,
+      warnings: item.warnings,
+      disclaimer: JS_SHARE_DISCLAIMER,
+      terms: JS_SHARE_TERMS
     });
     return;
   }

@@ -1,6 +1,6 @@
 {
   "name": "sql-database-simulator",
-  "version": "1.8.2",
+  "version": "2.0.0",
   "private": true,
   "description": "Multi-database SQL simulator landing page with IDE-style SQL runner.",
   "main": "server.js",
