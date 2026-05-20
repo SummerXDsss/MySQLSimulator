@@ -244,9 +244,13 @@ function applyInterpreterMode() {
     jsInterpreterBadge.innerHTML = `<i data-lucide="cpu"></i> ${labelMap[interpreter]}`;
     window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
   }
+  // 预览面板：网页预览模式总是显示；HTML JS 解释器在检测到 HTML 标签时也显示。
   if (jsPreviewSection) {
-    jsPreviewSection.hidden = interpreter !== "html-preview";
-    if (interpreter !== "html-preview" && jsPreviewFrame) {
+    const editorValue = jsEditor?.value || "";
+    const editorHasDom = /<\s*(button|input|form|div|section|main|header|footer|nav|aside|article|h[1-6]|p|span|ul|ol|li|table|tr|td|th|img|video|audio|canvas|svg|select|textarea|label|a|b|i|em|strong)\b/i.test(editorValue);
+    const showPreview = interpreter === "html-preview" || (interpreter === "html-js" && editorHasDom);
+    jsPreviewSection.hidden = !showPreview;
+    if (!showPreview && jsPreviewFrame) {
       jsPreviewFrame.srcdoc = "";
     }
   }
@@ -594,10 +598,21 @@ function extractJavaScript(input, interpreter = jsPrefs.interpreter) {
     scripts.push(match[2].trim());
   }
 
-  if (scripts.length) {
-    if (/<\/?[a-z][\s\S]*>/i.test(source)) {
-      warnings.push("已忽略 HTML/CSS，只执行 script 中的 JavaScript");
+  // 检测是否有可见 DOM 元素（button / div / input / form 等）。仅 <script> 不算。
+  const stripped = source.replace(scriptPattern, "");
+  const hasVisibleDom = /<\s*[a-z][\w-]*(\s|>|\/)/i.test(stripped);
+
+  if (hasVisibleDom) {
+    // HTML JS 模式下检测到可见 DOM——切到 iframe 沙箱以便看到 button、input、div 等效果。
+    if (scripts.length) {
+      warnings.push("检测到 HTML 标签，已在 iframe 沙箱中渲染网页效果，script 也会在沙箱内执行");
+    } else {
+      warnings.push("检测到 HTML 标签，已在 iframe 沙箱中渲染（纯展示，无 script）");
     }
+    return { code: source, warnings, mode: "html-render" };
+  }
+
+  if (scripts.length) {
     return { code: scripts.join("\n\n"), warnings, mode: "html-script" };
   }
 
@@ -864,20 +879,23 @@ async function getViewerIp() {
 
 function renderPreviewWatermark(ip) {
   if (!jsPreviewWatermark) return;
-  const tile = `<span>${escapeHtml(`IP ${ip} · 预览仅本机可见`)}</span>`;
-  jsPreviewWatermark.innerHTML = Array.from({ length: 24 }, () => tile).join("");
+  const tile = `<span>IP ${escapeHtml(String(ip))} · 预览仅本机可见</span>`;
+  jsPreviewWatermark.innerHTML = Array.from({ length: 30 }, () => tile).join("");
 }
 
 function buildPreviewSrcdoc(html, ip) {
   const safeIp = String(ip || "unknown").replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&#39;" }[c]));
   const guard = `\n<script>(() => {\n  const block = (name) => () => { throw new Error("受限沙箱：" + name + " 已被禁用"); };\n  try { window.fetch = block("fetch"); } catch {}\n  try { window.XMLHttpRequest = function(){ throw new Error("受限沙箱：XMLHttpRequest 已被禁用"); }; } catch {}\n  try { window.WebSocket = function(){ throw new Error("受限沙箱：WebSocket 已被禁用"); }; } catch {}\n  try { window.EventSource = function(){ throw new Error("受限沙箱：EventSource 已被禁用"); }; } catch {}\n  try { Object.defineProperty(window, "localStorage", { get: block("localStorage") }); } catch {}\n  try { Object.defineProperty(window, "sessionStorage", { get: block("sessionStorage") }); } catch {}\n  try { Object.defineProperty(window, "indexedDB", { get: block("indexedDB") }); } catch {}\n  try { Object.defineProperty(document, "cookie", { get: () => "", set: block("document.cookie") }); } catch {}\n  try { window.eval = block("eval"); } catch {}\n  try { window.Function = function(){ throw new Error("受限沙箱：Function 构造器已被禁用"); }; } catch {}\n})();</script>\n`;
-  const watermark = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n  grid-auto-rows: 90px; align-items: center; justify-items: center;\n  color: rgba(15, 23, 42, 0.16); font-family: "JetBrains Mono", monospace;\n  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; user-select: none;\n}\n#__sqlsim_watermark__ span { transform: rotate(-22deg); }\n</style>\n<div id="__sqlsim_watermark__" aria-hidden="true">${Array.from({ length: 24 }).map(() => `<span>IP ${safeIp} · 预览仅本机可见</span>`).join("")}</div>\n`;
+  // 水印：放进 iframe 内部，平铺并轻微旋转；颜色加深以确保可见。
+  const watermarkStyle = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n  grid-auto-rows: 90px; align-items: center; justify-items: center;\n  color: rgba(15, 23, 42, 0.28); font-family: monospace;\n  font-size: 13px; font-weight: 700; letter-spacing: 0.04em; user-select: none;\n  text-shadow: 0 0 1px rgba(255,255,255,0.8);\n}\n#__sqlsim_watermark__ span { transform: rotate(-22deg); white-space: nowrap; }\n@media (prefers-color-scheme: dark) {\n  #__sqlsim_watermark__ { color: rgba(255, 255, 255, 0.32); text-shadow: 0 0 1px rgba(0,0,0,0.6); }\n}\n</style>\n`;
+  const watermark = `${watermarkStyle}<div id="__sqlsim_watermark__" aria-hidden="true">${Array.from({ length: 30 }).map(() => `<span>IP ${safeIp} · 预览仅本机可见</span>`).join("")}</div>\n`;
   if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${watermark}${guard}</body>`);
   if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, `${watermark}${guard}</html>`);
-  return `${html}\n${watermark}${guard}`;
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}\n${watermark}${guard}</body></html>`;
 }
 
 async function runHtmlPreview(html) {
+  if (jsPreviewSection) jsPreviewSection.hidden = false;
   if (!jsPreviewFrame) {
     return [{ type: "error", message: "未找到预览容器" }];
   }
@@ -895,14 +913,16 @@ async function runCurrentJavaScript() {
   const extractionErrors = extraction.errors || [];
   const analysis = extractionErrors.length
     ? { ok: false, errors: extractionErrors, warnings: [] }
-    : analyzeJavaScript(extraction.code, jsPrefs.interpreter);
+    : analyzeJavaScript(extraction.code, jsPrefs.interpreter === "html-js" && extraction.mode === "html-render" ? "html-preview" : jsPrefs.interpreter);
 
   renderRisks(analysis, extraction);
   jsExtractStatus.textContent = jsPrefs.interpreter === "nodejs"
     ? "NodeJS JavaScript"
     : jsPrefs.interpreter === "html-preview"
       ? "HTML 预览（含 CSS/JS）"
-      : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
+      : extraction.mode === "html-render" ? "HTML + script 渲染"
+      : extraction.mode === "html-script" ? "已提取 script"
+      : "JavaScript only";
 
   if (!analysis.ok) {
     jsStatus.textContent = "已拦截";
@@ -911,9 +931,10 @@ async function runCurrentJavaScript() {
   }
 
   jsRunBtn.disabled = true;
-  jsStatus.textContent = jsPrefs.interpreter === "html-preview" ? "渲染预览中" : "执行中";
-  renderOutput([{ type: "info", message: jsPrefs.interpreter === "html-preview" ? "受限沙箱预览中..." : "Worker 沙箱执行中..." }]);
-  const lines = jsPrefs.interpreter === "html-preview"
+  const usePreview = jsPrefs.interpreter === "html-preview" || extraction.mode === "html-render";
+  jsStatus.textContent = usePreview ? "渲染预览中" : "执行中";
+  renderOutput([{ type: "info", message: usePreview ? "受限沙箱渲染中..." : "Worker 沙箱执行中..." }]);
+  const lines = usePreview
     ? await runHtmlPreview(extraction.code)
     : await runJavaScript(extraction.code);
   renderOutput(lines);
@@ -1034,6 +1055,7 @@ jsEditor.addEventListener("input", () => {
   lastHistoryValue = jsEditor.value;
   updateJsHighlight();
   refreshRiskState();
+  applyInterpreterMode();
 });
 jsEditor.addEventListener("scroll", syncJsHighlightScroll);
 jsEditor.addEventListener("click", () => {

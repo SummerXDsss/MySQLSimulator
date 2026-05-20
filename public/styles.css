@@ -1828,13 +1828,15 @@ h3 {
   align-items: center;
   justify-items: center;
   padding: 12px;
-  color: rgba(15, 23, 42, 0.16);
+  color: rgba(15, 23, 42, 0.32);
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.85);
   font-family: "JetBrains Mono", monospace;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.04em;
+  -webkit-user-select: none;
   user-select: none;
-  z-index: 2;
+  z-index: 4;
   text-align: center;
   line-height: 1.4;
 }
@@ -1845,7 +1847,8 @@ h3 {
 }
 
 [data-theme="dark"] .js-preview-watermark {
-  color: rgba(226, 232, 240, 0.18);
+  color: rgba(226, 232, 240, 0.36);
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.6);
 }
 
 [data-theme="dark"] .js-preview-host,
