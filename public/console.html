@@ -280,8 +280,12 @@
                       <span><b id="lintInfoCount">0</b> 提示</span>
                     </button>
                     <span class="lint-bar-spacer"></span>
-                    <span id="lintCursorHint" class="lint-cursor-hint">将光标移到带波浪线的代码上查看建议</span>
+                    <button type="button" id="lintToggleListBtn" class="lint-chip" aria-pressed="false" title="展开/收起问题列表">
+                      <i data-lucide="list"></i>
+                      <span>展开问题</span>
+                    </button>
                   </div>
+                  <div id="lintIssuePanel" class="lint-issue-panel" aria-live="polite" data-open="false"></div>
                 </div>
 
               <div class="output-grid">

@@ -1,6 +1,6 @@
 {
   "name": "sql-database-simulator",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "description": "Full-stack development simulator with IDE-style SQL and JavaScript runners.",
   "main": "server.js",

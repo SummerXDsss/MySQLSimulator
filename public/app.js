@@ -299,6 +299,8 @@ const lintSummaryEl = document.querySelector("#lintSummary");
 const lintErrorCountEl = document.querySelector("#lintErrorCount");
 const lintWarningCountEl = document.querySelector("#lintWarningCount");
 const lintInfoCountEl = document.querySelector("#lintInfoCount");
+const lintIssuePanel = document.querySelector("#lintIssuePanel");
+const lintToggleListBtn = document.querySelector("#lintToggleListBtn");
 
 const MYSQL_RESERVED_WORDS = new Set([
   "ACCESSIBLE","ADD","ALL","ALTER","ANALYZE","AND","AS","ASC","ASENSITIVE","BEFORE","BETWEEN","BIGINT","BINARY","BLOB","BOTH","BY",
@@ -605,6 +607,36 @@ function refreshLintBar() {
   if (lintBar) {
     lintBar.dataset.severity = counts.error > 0 ? "error" : counts.warning > 0 ? "warning" : counts.info > 0 ? "info" : "ok";
   }
+  renderLintIssuePanel();
+}
+
+function renderLintIssuePanel() {
+  if (!lintIssuePanel) return;
+  const issues = SQL_LINT_STATE.results;
+  const filter = SQL_LINT_STATE.filter || "all";
+  const filtered = filter === "all" ? issues : issues.filter((issue) => issue.severity === filter);
+  if (!filtered.length) {
+    lintIssuePanel.innerHTML = `<div class="lint-issue-empty">${issues.length ? "当前筛选下没有问题" : "未发现问题，SQL 看起来还行"}</div>`;
+    return;
+  }
+  lintIssuePanel.innerHTML = filtered.map((issue) => `
+    <button type="button" class="lint-issue-row ${issue.severity}" data-issue-offset="${issue.start}">
+      <span class="lint-issue-severity">${severityLabel(issue.severity)}</span>
+      <span class="lint-issue-loc">第 ${issue.line} 行 · 第 ${issue.column} 列</span>
+      <span class="lint-issue-msg">
+        ${escapeHtml(issue.message)}
+        <span class="lint-issue-rule">${escapeHtml(issue.ruleId)}</span>
+      </span>
+    </button>
+  `).join("");
+}
+
+function setLintListOpen(open) {
+  if (!lintIssuePanel || !lintToggleListBtn) return;
+  lintIssuePanel.dataset.open = open ? "true" : "false";
+  lintToggleListBtn.setAttribute("aria-pressed", String(open));
+  const label = lintToggleListBtn.querySelector("span");
+  if (label) label.textContent = open ? "收起问题" : "展开问题";
 }
 
 function applyLintHighlightDecorations(html, sql) {
@@ -633,17 +665,25 @@ function updateLintOverlay() {
     overlay.innerHTML = "";
     return;
   }
-  // Build a synthetic structure where every character is positioned identically to the textarea/highlightCode.
-  // We render an invisible mirror containing lint underline spans aligned by character.
+  // Mirror the textarea but replace every visible character with a space so the
+  // overlay never paints any glyph on top of the highlight layer (avoids ghosting).
+  // The underline backgrounds on .lint-mark still render because monospace spaces
+  // preserve width and line position.
+  const filter = SQL_LINT_STATE.filter || "all";
+  const issues = filter === "all"
+    ? SQL_LINT_STATE.results
+    : SQL_LINT_STATE.results.filter((issue) => issue.severity === filter);
+  const replaceWithSpace = (str) => str.replace(/[^\n]/g, " ");
   let cursor = 0;
   let html = "";
-  for (const issue of SQL_LINT_STATE.results) {
+  for (const issue of issues) {
     if (issue.start < cursor) continue;
-    html += escapeHtml(sql.slice(cursor, issue.start));
-    html += `<span class="lint-mark lint-${issue.severity}" data-lint-index="${SQL_LINT_STATE.results.indexOf(issue)}">${escapeHtml(sql.slice(issue.start, issue.end) || " ")}</span>`;
+    html += escapeHtml(replaceWithSpace(sql.slice(cursor, issue.start)));
+    const span = sql.slice(issue.start, issue.end) || " ";
+    html += `<span class="lint-mark lint-${issue.severity}" data-lint-index="${SQL_LINT_STATE.results.indexOf(issue)}">${escapeHtml(replaceWithSpace(span))}</span>`;
     cursor = Math.max(issue.end, issue.start + 1);
   }
-  html += escapeHtml(sql.slice(cursor));
+  html += escapeHtml(replaceWithSpace(sql.slice(cursor)));
   overlay.innerHTML = `<pre><code>${html}\n</code></pre>`;
   const pre = overlay.querySelector("pre");
   if (pre) {
@@ -1766,8 +1806,28 @@ sqlEditor.addEventListener("keydown", (event) => {
 if (lintBar) {
   lintBar.addEventListener("click", (event) => {
     const chip = event.target.closest("[data-lint-filter]");
-    if (!chip) return;
-    setLintFilter(chip.dataset.lintFilter);
+    if (chip) {
+      setLintFilter(chip.dataset.lintFilter);
+      // Open the issue list automatically when filtering by severity.
+      if (chip.dataset.lintFilter !== "all" && SQL_LINT_STATE.results.length) setLintListOpen(true);
+      return;
+    }
+    if (event.target.closest("#lintToggleListBtn")) {
+      const next = lintIssuePanel?.dataset.open !== "true";
+      setLintListOpen(next);
+    }
+  });
+}
+
+if (lintIssuePanel) {
+  lintIssuePanel.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-issue-offset]");
+    if (!row) return;
+    const offset = Number(row.dataset.issueOffset);
+    if (Number.isNaN(offset)) return;
+    sqlEditor.focus();
+    sqlEditor.setSelectionRange(offset, offset);
+    syncEditorScroll();
   });
 }
 

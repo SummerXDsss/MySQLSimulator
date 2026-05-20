@@ -170,9 +170,14 @@
               <section class="side-section js-preview-section" id="jsPreviewSection" hidden>
                 <div class="panel-title">
                   <span><i data-lucide="monitor"></i> 网页预览（受限沙箱）</span>
-                  <button id="jsRefreshPreviewBtn" class="icon-button" type="button" aria-label="刷新预览">
-                    <i data-lucide="rotate-ccw"></i>
-                  </button>
+                  <div class="panel-actions">
+                    <button id="jsPreviewMaskIpBtn" class="icon-button" type="button" aria-pressed="true" aria-label="切换水印 IP 显示" title="隐藏/显示 IP 中段">
+                      <i data-lucide="eye-off"></i>
+                    </button>
+                    <button id="jsRefreshPreviewBtn" class="icon-button" type="button" aria-label="刷新预览" title="刷新预览">
+                      <i data-lucide="rotate-ccw"></i>
+                    </button>
+                  </div>
                 </div>
                 <div class="js-preview-host">
                   <iframe

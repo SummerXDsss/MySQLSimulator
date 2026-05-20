@@ -34,6 +34,7 @@ const jsPreviewSection = document.querySelector("#jsPreviewSection");
 const jsPreviewFrame = document.querySelector("#jsPreviewFrame");
 const jsPreviewWatermark = document.querySelector("#jsPreviewWatermark");
 const jsRefreshPreviewBtn = document.querySelector("#jsRefreshPreviewBtn");
+const jsPreviewMaskIpBtn = document.querySelector("#jsPreviewMaskIpBtn");
 
 const JS_TIMEOUT_MS = 2000;
 const JS_MAX_BYTES = 128 * 1024;
@@ -877,21 +878,62 @@ async function getViewerIp() {
   }
 }
 
+function maskIpForWatermark(ip) {
+  const raw = String(ip || "unknown").trim();
+  if (!raw || raw === "unknown") return raw;
+  const ipv4 = raw.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) return `${ipv4[1]}.***.***.${ipv4[4]}`;
+  if (raw.includes(":")) {
+    const parts = raw.split(":");
+    if (parts.length <= 2) return parts[0] + ":***";
+    return `${parts[0]}:***:***:${parts[parts.length - 1]}`;
+  }
+  return "***";
+}
+
 function renderPreviewWatermark(ip) {
   if (!jsPreviewWatermark) return;
-  const tile = `<span>IP ${escapeHtml(String(ip))} · 预览仅本机可见</span>`;
-  jsPreviewWatermark.innerHTML = Array.from({ length: 30 }, () => tile).join("");
+  const display = jsPreviewState.maskIp ? maskIpForWatermark(ip) : ip;
+  const tile = `<span>IP ${escapeHtml(String(display))} · 预览仅本机可见</span>`;
+  jsPreviewWatermark.innerHTML = Array.from({ length: 60 }, () => tile).join("");
 }
 
 function buildPreviewSrcdoc(html, ip) {
-  const safeIp = String(ip || "unknown").replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&#39;" }[c]));
+  const display = jsPreviewState.maskIp ? maskIpForWatermark(ip) : ip;
+  const safeIp = String(display || "unknown").replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&#39;" }[c]));
   const guard = `\n<script>(() => {\n  const block = (name) => () => { throw new Error("受限沙箱：" + name + " 已被禁用"); };\n  try { window.fetch = block("fetch"); } catch {}\n  try { window.XMLHttpRequest = function(){ throw new Error("受限沙箱：XMLHttpRequest 已被禁用"); }; } catch {}\n  try { window.WebSocket = function(){ throw new Error("受限沙箱：WebSocket 已被禁用"); }; } catch {}\n  try { window.EventSource = function(){ throw new Error("受限沙箱：EventSource 已被禁用"); }; } catch {}\n  try { Object.defineProperty(window, "localStorage", { get: block("localStorage") }); } catch {}\n  try { Object.defineProperty(window, "sessionStorage", { get: block("sessionStorage") }); } catch {}\n  try { Object.defineProperty(window, "indexedDB", { get: block("indexedDB") }); } catch {}\n  try { Object.defineProperty(document, "cookie", { get: () => "", set: block("document.cookie") }); } catch {}\n  try { window.eval = block("eval"); } catch {}\n  try { window.Function = function(){ throw new Error("受限沙箱：Function 构造器已被禁用"); }; } catch {}\n})();</script>\n`;
-  // 水印：放进 iframe 内部，平铺并轻微旋转；颜色加深以确保可见。
-  const watermarkStyle = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n  grid-auto-rows: 90px; align-items: center; justify-items: center;\n  color: rgba(15, 23, 42, 0.28); font-family: monospace;\n  font-size: 13px; font-weight: 700; letter-spacing: 0.04em; user-select: none;\n  text-shadow: 0 0 1px rgba(255,255,255,0.8);\n}\n#__sqlsim_watermark__ span { transform: rotate(-22deg); white-space: nowrap; }\n@media (prefers-color-scheme: dark) {\n  #__sqlsim_watermark__ { color: rgba(255, 255, 255, 0.32); text-shadow: 0 0 1px rgba(0,0,0,0.6); }\n}\n</style>\n`;
-  const watermark = `${watermarkStyle}<div id="__sqlsim_watermark__" aria-hidden="true">${Array.from({ length: 30 }).map(() => `<span>IP ${safeIp} · 预览仅本机可见</span>`).join("")}</div>\n`;
+
+  // 水印铺满整个预览：用 SVG data-URI 重复贴图实现，30° 倾斜，cover 整个 viewport。
+  const text = `IP ${safeIp} · 预览仅本机可见`;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180' viewBox='0 0 320 180'><g transform='rotate(-30 160 90)'><text x='160' y='95' font-family='Menlo, monospace' font-size='15' font-weight='700' fill='rgba(15,23,42,0.32)' text-anchor='middle'>${text}</text></g></svg>`;
+  const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const watermarkStyle = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  background-image: url("${dataUri}");\n  background-repeat: repeat;\n  background-size: 320px 180px;\n  -webkit-user-select: none; user-select: none;\n}\n@media (prefers-color-scheme: dark) {\n  #__sqlsim_watermark__ { mix-blend-mode: difference; opacity: 0.85; }\n}\n</style>\n`;
+  const watermark = `${watermarkStyle}<div id="__sqlsim_watermark__" aria-hidden="true"></div>\n`;
   if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${watermark}${guard}</body>`);
   if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, `${watermark}${guard}</html>`);
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}\n${watermark}${guard}</body></html>`;
+}
+
+const jsPreviewState = {
+  maskIp: false,
+  lastIp: null,
+  lastHtml: null
+};
+
+function setPreviewIpMasked(masked) {
+  jsPreviewState.maskIp = masked;
+  if (jsPreviewMaskIpBtn) {
+    jsPreviewMaskIpBtn.setAttribute("aria-pressed", String(masked));
+    const icon = jsPreviewMaskIpBtn.querySelector("i");
+    if (icon) icon.setAttribute("data-lucide", masked ? "eye" : "eye-off");
+    jsPreviewMaskIpBtn.title = masked ? "显示完整 IP" : "隐藏 IP 第二、三段";
+    window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
+  }
+  // Re-render watermark + iframe with the updated mask preference.
+  if (jsPreviewState.lastHtml !== null && jsPreviewState.lastIp !== null && jsPreviewFrame) {
+    renderPreviewWatermark(jsPreviewState.lastIp);
+    jsPreviewFrame.srcdoc = buildPreviewSrcdoc(jsPreviewState.lastHtml, jsPreviewState.lastIp);
+  }
 }
 
 async function runHtmlPreview(html) {
@@ -900,10 +942,13 @@ async function runHtmlPreview(html) {
     return [{ type: "error", message: "未找到预览容器" }];
   }
   const ip = await getViewerIp();
+  jsPreviewState.lastIp = ip;
+  jsPreviewState.lastHtml = html;
   renderPreviewWatermark(ip);
   jsPreviewFrame.srcdoc = buildPreviewSrcdoc(html, ip);
+  const display = jsPreviewState.maskIp ? maskIpForWatermark(ip) : ip;
   return [
-    { type: "info", message: `已渲染网页预览 · 访问 IP ${ip}` },
+    { type: "info", message: `已渲染网页预览 · 水印 IP ${display}` },
     { type: "done", message: "预览完成（高危 API 已被沙箱拦截）" }
   ];
 }
@@ -955,6 +1000,10 @@ jsRunBtn.addEventListener("click", runCurrentJavaScript);
 jsRefreshPreviewBtn?.addEventListener("click", () => {
   if (jsPrefs.interpreter === "html-preview") runCurrentJavaScript();
 });
+jsPreviewMaskIpBtn?.addEventListener("click", () => {
+  setPreviewIpMasked(!jsPreviewState.maskIp);
+});
+setPreviewIpMasked(jsPreviewState.maskIp);
 jsExampleBtn.addEventListener("click", () => {
   setEditorValue(jsExample);
   jsStatus.textContent = "已载入示例";
