@@ -87,9 +87,11 @@ const SECURITY_HEADERS = {
 const helpRows = [
   ["DDL", "CREATE DATABASE, DROP DATABASE, CREATE TABLE, ALTER TABLE, DROP TABLE, TRUNCATE TABLE, RENAME TABLE, CREATE INDEX, DROP INDEX"],
   ["DML", "INSERT, SELECT, UPDATE, DELETE"],
-  ["元信息", "SHOW DATABASES, SHOW TABLES, SHOW COLUMNS, SHOW CREATE TABLE, SHOW VARIABLES, SHOW STATUS, DESCRIBE, EXPLAIN"],
-  ["会话", "USE, SELECT DATABASE(), SELECT VERSION(), SELECT NOW(), SELECT USER(), SET"],
-  ["事务", "BEGIN, START TRANSACTION, COMMIT, ROLLBACK"]
+  ["元信息", "SHOW DATABASES, SHOW TABLES, SHOW COLUMNS, SHOW CREATE TABLE, SHOW VARIABLES, SHOW STATUS, SHOW PROCEDURE STATUS, SHOW FUNCTION STATUS, SHOW CREATE PROCEDURE/FUNCTION, DESCRIBE, EXPLAIN"],
+  ["会话", "USE, SELECT DATABASE(), SELECT VERSION(), SELECT NOW(), SELECT USER(), SET, SET @user_var, SELECT @user_var, SELECT @@system_var"],
+  ["事务", "BEGIN, START TRANSACTION, COMMIT, ROLLBACK"],
+  ["脚本", "DELIMITER //, CREATE PROCEDURE, CREATE FUNCTION, DROP PROCEDURE/FUNCTION, CALL（注意：模拟器仅登记元数据，不执行过程体）"],
+  ["函数", "CONCAT, CONCAT_WS, LENGTH, UPPER/LOWER, SUBSTRING, REPLACE, IFNULL, COALESCE, NULLIF, IF, CASE WHEN, ROUND, ABS, NOW, DATE_FORMAT, COUNT/SUM/AVG/MAX/MIN, GROUP_CONCAT"]
 ];
 
 const examples = [
@@ -145,8 +147,12 @@ function createInitialState() {
       sql_mode: "STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION",
       time_zone: "+08:00",
       character_set_client: "utf8mb4",
-      max_connections: "151"
+      max_connections: "151",
+      version: "8.0.36-simulator"
     },
+    userVariables: {},
+    procedures: {},
+    functions: {},
     databases: {
       demo: {
         name: "demo",
@@ -262,6 +268,9 @@ function getStateSnapshot() {
     currentDatabase: state.currentDatabase,
     transactionSnapshot: state.transactionSnapshot,
     variables: state.variables,
+    userVariables: state.userVariables || {},
+    procedures: state.procedures || {},
+    functions: state.functions || {},
     databases: state.databases
   });
 }
@@ -424,6 +433,24 @@ function extractSharedJavaScript(source, interpreter = "html-js") {
   const scriptPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   const scripts = [];
   let match;
+
+  if (interpreter === "html-preview") {
+    if (/<iframe\b|<frame\b|<object\b|<embed\b|<applet\b|<meta[^>]*http-equiv/i.test(text)) {
+      return {
+        code: "",
+        warnings,
+        errors: ["禁止嵌入 iframe / object / 跳转 meta，请只使用普通 HTML/CSS"]
+      };
+    }
+    while ((match = scriptPattern.exec(text)) !== null) {
+      if (/\bsrc\s*=/i.test(match[1] || "")) {
+        warnings.push("已忽略外部 script src，分享内容不会加载远程脚本");
+        continue;
+      }
+      scripts.push(match[2]);
+    }
+    return { code: scripts.join("\n"), warnings, errors: [] };
+  }
 
   if (interpreter === "nodejs" && /<\/?[a-z][\s\S]*>/i.test(text)) {
     return {
@@ -630,6 +657,9 @@ function validateImportedState(importedState) {
       : databaseNames[0],
     transactionSnapshot: null,
     variables: importedState.variables && typeof importedState.variables === "object" ? importedState.variables : {},
+    userVariables: importedState.userVariables && typeof importedState.userVariables === "object" ? importedState.userVariables : {},
+    procedures: importedState.procedures && typeof importedState.procedures === "object" ? importedState.procedures : {},
+    functions: importedState.functions && typeof importedState.functions === "object" ? importedState.functions : {},
     databases: importedState.databases
   };
 }
@@ -1087,68 +1117,91 @@ class SqlError extends Error {
 
 function splitStatements(sql) {
   const statements = [];
-  let current = "";
+  let buffer = "";
+  let delimiter = ";";
   let quote = null;
   let blockComment = false;
   let lineComment = false;
+  let atLineStart = true;
 
-  for (let index = 0; index < sql.length; index += 1) {
+  const flush = () => {
+    const trimmed = buffer.trim();
+    if (trimmed) statements.push(trimmed);
+    buffer = "";
+  };
+
+  let index = 0;
+  while (index < sql.length) {
+    if (atLineStart && !quote && !blockComment && !lineComment && /^\s*$/.test(buffer)) {
+      const directive = sql.slice(index).match(/^[ \t]*delimiter[ \t]+(\S+)[ \t]*\r?\n?/i);
+      if (directive) {
+        delimiter = directive[1];
+        buffer = "";
+        index += directive[0].length;
+        atLineStart = true;
+        continue;
+      }
+    }
+
     const char = sql[index];
     const next = sql[index + 1];
 
     if (lineComment) {
       if (char === "\n") {
         lineComment = false;
-        current += char;
+        buffer += char;
+        atLineStart = true;
       }
+      index += 1;
       continue;
     }
 
     if (blockComment) {
       if (char === "*" && next === "/") {
         blockComment = false;
-        index += 1;
+        index += 2;
+        continue;
       }
+      index += 1;
       continue;
     }
 
     if (!quote && char === "-" && next === "-") {
       lineComment = true;
-      index += 1;
+      index += 2;
       continue;
     }
 
     if (!quote && char === "#") {
       lineComment = true;
+      index += 1;
       continue;
     }
 
     if (!quote && char === "/" && next === "*") {
       blockComment = true;
-      index += 1;
+      index += 2;
       continue;
     }
 
     if ((char === "'" || char === '"' || char === "`") && sql[index - 1] !== "\\") {
-      if (quote === char) {
-        quote = null;
-      } else if (!quote) {
-        quote = char;
-      }
+      if (quote === char) quote = null;
+      else if (!quote) quote = char;
     }
 
-    if (char === ";" && !quote) {
-      const trimmed = current.trim();
-      if (trimmed) statements.push(trimmed);
-      current = "";
+    if (!quote && sql.substr(index, delimiter.length) === delimiter) {
+      flush();
+      index += delimiter.length;
+      atLineStart = false;
       continue;
     }
 
-    current += char;
+    buffer += char;
+    atLineStart = char === "\n";
+    index += 1;
   }
 
-  const trimmed = current.trim();
-  if (trimmed) statements.push(trimmed);
+  flush();
   return statements;
 }
 
@@ -1194,6 +1247,644 @@ function parseLiteral(value) {
   if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
   return stripTicks(raw);
 }
+
+const SCALAR_FUNCTIONS = {
+  concat: (...args) => args.every((v) => v === null || v === undefined) ? null : args.map((v) => v === null || v === undefined ? "" : String(v)).join(""),
+  concat_ws: (sep, ...args) => args.filter((v) => v !== null && v !== undefined).map(String).join(String(sep ?? "")),
+  length: (value) => value === null || value === undefined ? null : Buffer.byteLength(String(value), "utf8"),
+  char_length: (value) => value === null || value === undefined ? null : String(value).length,
+  upper: (value) => value === null || value === undefined ? null : String(value).toUpperCase(),
+  ucase: (value) => value === null || value === undefined ? null : String(value).toUpperCase(),
+  lower: (value) => value === null || value === undefined ? null : String(value).toLowerCase(),
+  lcase: (value) => value === null || value === undefined ? null : String(value).toLowerCase(),
+  trim: (value) => value === null || value === undefined ? null : String(value).trim(),
+  ltrim: (value) => value === null || value === undefined ? null : String(value).replace(/^\s+/, ""),
+  rtrim: (value) => value === null || value === undefined ? null : String(value).replace(/\s+$/, ""),
+  reverse: (value) => value === null || value === undefined ? null : String(value).split("").reverse().join(""),
+  substring: (value, start, length) => {
+    if (value === null || value === undefined) return null;
+    const text = String(value);
+    let from = Number(start);
+    if (Number.isNaN(from)) return null;
+    if (from > 0) from -= 1;
+    else if (from < 0) from = Math.max(0, text.length + from);
+    if (length === undefined) return text.slice(from);
+    const end = from + Number(length);
+    return text.slice(from, end);
+  },
+  substr: (...args) => SCALAR_FUNCTIONS.substring(...args),
+  left: (value, length) => value === null || value === undefined ? null : String(value).slice(0, Number(length) || 0),
+  right: (value, length) => {
+    if (value === null || value === undefined) return null;
+    const len = Number(length) || 0;
+    return len === 0 ? "" : String(value).slice(-len);
+  },
+  replace: (value, from, to) => value === null || value === undefined ? null : String(value).split(String(from)).join(String(to ?? "")),
+  repeat: (value, count) => value === null || value === undefined ? null : String(value).repeat(Math.max(0, Math.floor(Number(count) || 0))),
+  ifnull: (value, fallback) => value === null || value === undefined ? fallback : value,
+  nullif: (a, b) => a === b ? null : a,
+  coalesce: (...args) => {
+    for (const item of args) if (item !== null && item !== undefined) return item;
+    return null;
+  },
+  if: (cond, whenTrue, whenFalse) => isTruthy(cond) ? whenTrue : whenFalse,
+  greatest: (...args) => args.reduce((acc, v) => acc === null || compareValues(v, acc) > 0 ? v : acc, args[0] ?? null),
+  least: (...args) => args.reduce((acc, v) => acc === null || compareValues(v, acc) < 0 ? v : acc, args[0] ?? null),
+  abs: (value) => value === null || value === undefined ? null : Math.abs(Number(value)),
+  round: (value, digits = 0) => value === null || value === undefined ? null : Number(Number(value).toFixed(Math.max(0, Math.floor(Number(digits) || 0)))),
+  ceil: (value) => value === null || value === undefined ? null : Math.ceil(Number(value)),
+  ceiling: (value) => value === null || value === undefined ? null : Math.ceil(Number(value)),
+  floor: (value) => value === null || value === undefined ? null : Math.floor(Number(value)),
+  truncate: (value, digits = 0) => {
+    if (value === null || value === undefined) return null;
+    const factor = Math.pow(10, Math.floor(Number(digits) || 0));
+    return Math.trunc(Number(value) * factor) / factor;
+  },
+  mod: (a, b) => a === null || b === null ? null : Number(a) % Number(b),
+  power: (a, b) => Math.pow(Number(a), Number(b)),
+  pow: (a, b) => Math.pow(Number(a), Number(b)),
+  sqrt: (value) => Math.sqrt(Number(value)),
+  rand: () => Math.random(),
+  pi: () => Math.PI,
+  now: () => formatDateTime(new Date()),
+  current_timestamp: () => formatDateTime(new Date()),
+  localtime: () => formatDateTime(new Date()),
+  localtimestamp: () => formatDateTime(new Date()),
+  curdate: () => formatDateTime(new Date()).slice(0, 10),
+  current_date: () => formatDateTime(new Date()).slice(0, 10),
+  curtime: () => formatDateTime(new Date()).slice(11),
+  current_time: () => formatDateTime(new Date()).slice(11),
+  unix_timestamp: (value) => {
+    const date = value === undefined ? new Date() : new Date(String(value).replace(" ", "T"));
+    return Math.floor(date.getTime() / 1000);
+  },
+  from_unixtime: (seconds) => formatDateTime(new Date(Number(seconds) * 1000)),
+  date_format: (value, fmt) => {
+    if (value === null || value === undefined) return null;
+    const date = new Date(String(value).replace(" ", "T"));
+    if (Number.isNaN(date.getTime())) return null;
+    const pad = (n, w = 2) => String(n).padStart(w, "0");
+    return String(fmt || "").replace(/%([YymdHiSsTjMD])/g, (_, key) => {
+      switch (key) {
+        case "Y": return String(date.getFullYear());
+        case "y": return pad(date.getFullYear() % 100);
+        case "m": return pad(date.getMonth() + 1);
+        case "d": return pad(date.getDate());
+        case "H": return pad(date.getHours());
+        case "i": return pad(date.getMinutes());
+        case "S": case "s": return pad(date.getSeconds());
+        case "T": return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+        default: return key;
+      }
+    });
+  },
+  year: (value) => value ? new Date(String(value).replace(" ", "T")).getFullYear() : null,
+  month: (value) => value ? new Date(String(value).replace(" ", "T")).getMonth() + 1 : null,
+  day: (value) => value ? new Date(String(value).replace(" ", "T")).getDate() : null,
+  hour: (value) => value ? new Date(String(value).replace(" ", "T")).getHours() : null,
+  minute: (value) => value ? new Date(String(value).replace(" ", "T")).getMinutes() : null,
+  second: (value) => value ? new Date(String(value).replace(" ", "T")).getSeconds() : null,
+  datediff: (a, b) => {
+    const left = new Date(String(a).replace(" ", "T"));
+    const right = new Date(String(b).replace(" ", "T"));
+    return Math.floor((left.setHours(0, 0, 0, 0) - right.setHours(0, 0, 0, 0)) / 86400000);
+  },
+  database: () => state.currentDatabase || null,
+  schema: () => state.currentDatabase || null,
+  version: () => state.variables?.version || "8.0.36-simulator",
+  user: () => "simulator@localhost",
+  current_user: () => "simulator@localhost",
+  session_user: () => "simulator@localhost",
+  connection_id: () => 1,
+  cast: (value) => value,
+  convert: (value) => value,
+  hex: (value) => value === null || value === undefined ? null : Buffer.from(String(value), "utf8").toString("hex").toUpperCase(),
+  unhex: (value) => value === null || value === undefined ? null : Buffer.from(String(value), "hex").toString("utf8"),
+  md5: (value) => value === null || value === undefined ? null : crypto.createHash("md5").update(String(value)).digest("hex"),
+  sha1: (value) => value === null || value === undefined ? null : crypto.createHash("sha1").update(String(value)).digest("hex"),
+  sha2: (value, bits = 256) => {
+    if (value === null || value === undefined) return null;
+    const algo = `sha${[224, 256, 384, 512].includes(Number(bits)) ? bits : 256}`;
+    return crypto.createHash(algo).update(String(value)).digest("hex");
+  },
+  uuid: () => crypto.randomUUID(),
+  last_insert_id: () => state._lastInsertId || 0,
+  row_count: () => state._rowCount ?? -1,
+  found_rows: () => state._foundRows ?? 0
+};
+
+const AGGREGATE_FUNCTIONS = new Set(["count", "sum", "avg", "min", "max", "group_concat"]);
+
+function isTruthy(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "boolean") return value;
+  const text = String(value).trim();
+  if (text === "") return false;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text) !== 0;
+  return true;
+}
+
+function tokenizeExpression(input) {
+  const tokens = [];
+  const text = String(input || "");
+  let index = 0;
+
+  while (index < text.length) {
+    const char = text[index];
+
+    if (/\s/.test(char)) { index += 1; continue; }
+
+    if (char === "'" || char === '"') {
+      let end = index + 1;
+      while (end < text.length) {
+        if (text[end] === "\\") { end += 2; continue; }
+        if (text[end] === char) break;
+        end += 1;
+      }
+      tokens.push({ type: "string", value: text.slice(index + 1, end).replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, "\\") });
+      index = end + 1;
+      continue;
+    }
+
+    if (char === "`") {
+      const end = text.indexOf("`", index + 1);
+      tokens.push({ type: "ident", value: text.slice(index + 1, end) });
+      index = end + 1;
+      continue;
+    }
+
+    if (/\d/.test(char) || (char === "." && /\d/.test(text[index + 1]))) {
+      let end = index + 1;
+      while (end < text.length && /[\d.]/.test(text[end])) end += 1;
+      tokens.push({ type: "number", value: Number(text.slice(index, end)) });
+      index = end;
+      continue;
+    }
+
+    if (char === "@") {
+      if (text[index + 1] === "@") {
+        let end = index + 2;
+        while (end < text.length && /[\w.]/.test(text[end])) end += 1;
+        tokens.push({ type: "sysvar", value: text.slice(index + 2, end) });
+        index = end;
+      } else {
+        let end = index + 1;
+        while (end < text.length && /[\w.]/.test(text[end])) end += 1;
+        tokens.push({ type: "uservar", value: text.slice(index + 1, end) });
+        index = end;
+      }
+      continue;
+    }
+
+    if (char === ":" && text[index + 1] === "=") {
+      tokens.push({ type: "op", value: ":=" });
+      index += 2;
+      continue;
+    }
+
+    const twoChar = text.substr(index, 2);
+    if (["<>", "!=", "<=", ">=", "&&", "||"].includes(twoChar)) {
+      tokens.push({ type: "op", value: twoChar });
+      index += 2;
+      continue;
+    }
+
+    if ("()+-*/%,<>=".includes(char)) {
+      tokens.push({ type: "op", value: char });
+      index += 1;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(char)) {
+      let end = index + 1;
+      while (end < text.length && /[\w$]/.test(text[end])) end += 1;
+      const word = text.slice(index, end);
+      const upper = word.toUpperCase();
+      if (["AND", "OR", "NOT", "XOR", "BETWEEN", "IN", "IS", "LIKE", "DIV", "MOD"].includes(upper)) {
+        tokens.push({ type: "op", value: upper });
+      } else if (["NULL", "TRUE", "FALSE"].includes(upper)) {
+        tokens.push({ type: upper === "NULL" ? "null" : "bool", value: upper === "TRUE" });
+      } else if (upper === "CASE" || upper === "WHEN" || upper === "THEN" || upper === "ELSE" || upper === "END" || upper === "DISTINCT") {
+        tokens.push({ type: "kw", value: upper });
+      } else {
+        tokens.push({ type: "ident", value: word });
+      }
+      index = end;
+      continue;
+    }
+
+    throw new SqlError(`Unsupported character '${char}' in expression`);
+  }
+
+  return tokens;
+}
+
+function parseExpression(tokens) {
+  let pos = 0;
+
+  const peek = (offset = 0) => tokens[pos + offset];
+  const consume = (type, value) => {
+    const token = tokens[pos];
+    if (!token || token.type !== type || (value !== undefined && token.value !== value)) return null;
+    pos += 1;
+    return token;
+  };
+  const expect = (type, value) => {
+    const token = consume(type, value);
+    if (!token) throw new SqlError(`Expected ${value || type} in expression`);
+    return token;
+  };
+
+  function parseOr() {
+    let left = parseAnd();
+    while (peek() && peek().type === "op" && (peek().value === "OR" || peek().value === "||")) {
+      pos += 1;
+      const right = parseAnd();
+      left = { type: "logical", op: "OR", left, right };
+    }
+    return left;
+  }
+
+  function parseAnd() {
+    let left = parseNot();
+    while (peek() && peek().type === "op" && (peek().value === "AND" || peek().value === "&&")) {
+      pos += 1;
+      const right = parseNot();
+      left = { type: "logical", op: "AND", left, right };
+    }
+    return left;
+  }
+
+  function parseNot() {
+    if (peek() && peek().type === "op" && peek().value === "NOT") {
+      pos += 1;
+      return { type: "not", argument: parseNot() };
+    }
+    return parseComparison();
+  }
+
+  function parseComparison() {
+    let left = parseAdditive();
+    while (peek()) {
+      const token = peek();
+      if (token.type === "op" && ["=", ":=", "<", ">", "<=", ">=", "!=", "<>"].includes(token.value)) {
+        const op = token.value;
+        pos += 1;
+        const right = parseAdditive();
+        left = { type: "compare", op, left, right };
+        continue;
+      }
+      if (token.type === "op" && token.value === "IS") {
+        pos += 1;
+        const negated = consume("op", "NOT");
+        const target = peek();
+        if (target && target.type === "null") { pos += 1; left = { type: "isnull", negated: Boolean(negated), argument: left }; continue; }
+        if (target && target.type === "bool") { pos += 1; left = { type: "isbool", value: target.value, negated: Boolean(negated), argument: left }; continue; }
+        throw new SqlError("Expected NULL/TRUE/FALSE after IS");
+      }
+      if (token.type === "op" && token.value === "LIKE") {
+        pos += 1;
+        const right = parseAdditive();
+        left = { type: "like", left, right };
+        continue;
+      }
+      if (token.type === "op" && token.value === "IN") {
+        pos += 1;
+        expect("op", "(");
+        const list = [];
+        if (!consume("op", ")")) {
+          list.push(parseOr());
+          while (consume("op", ",")) list.push(parseOr());
+          expect("op", ")");
+        }
+        left = { type: "in", argument: left, list };
+        continue;
+      }
+      if (token.type === "op" && token.value === "BETWEEN") {
+        pos += 1;
+        const lower = parseAdditive();
+        expect("op", "AND");
+        const upper = parseAdditive();
+        left = { type: "between", argument: left, lower, upper };
+        continue;
+      }
+      break;
+    }
+    return left;
+  }
+
+  function parseAdditive() {
+    let left = parseMultiplicative();
+    while (peek() && peek().type === "op" && (peek().value === "+" || peek().value === "-")) {
+      const op = peek().value;
+      pos += 1;
+      const right = parseMultiplicative();
+      left = { type: "binop", op, left, right };
+    }
+    return left;
+  }
+
+  function parseMultiplicative() {
+    let left = parseUnary();
+    while (peek() && peek().type === "op" && ["*", "/", "%", "DIV", "MOD"].includes(peek().value)) {
+      const op = peek().value;
+      pos += 1;
+      const right = parseUnary();
+      left = { type: "binop", op, left, right };
+    }
+    return left;
+  }
+
+  function parseUnary() {
+    const token = peek();
+    if (token && token.type === "op" && (token.value === "+" || token.value === "-")) {
+      pos += 1;
+      return { type: "unary", op: token.value, argument: parseUnary() };
+    }
+    return parsePrimary();
+  }
+
+  function parsePrimary() {
+    const token = peek();
+    if (!token) throw new SqlError("Unexpected end of expression");
+
+    if (token.type === "kw" && token.value === "CASE") {
+      pos += 1;
+      const branches = [];
+      let target = null;
+      if (!(peek() && peek().type === "kw" && peek().value === "WHEN")) {
+        target = parseOr();
+      }
+      while (peek() && peek().type === "kw" && peek().value === "WHEN") {
+        pos += 1;
+        const condition = parseOr();
+        expect("kw", "THEN");
+        const result = parseOr();
+        branches.push({ condition, result });
+      }
+      let fallback = null;
+      if (consume("kw", "ELSE")) fallback = parseOr();
+      expect("kw", "END");
+      return { type: "case", target, branches, fallback };
+    }
+
+    if (token.type === "op" && token.value === "(") {
+      pos += 1;
+      const expression = parseOr();
+      expect("op", ")");
+      return expression;
+    }
+
+    if (token.type === "number") { pos += 1; return { type: "literal", value: token.value }; }
+    if (token.type === "string") { pos += 1; return { type: "literal", value: token.value }; }
+    if (token.type === "null") { pos += 1; return { type: "literal", value: null }; }
+    if (token.type === "bool") { pos += 1; return { type: "literal", value: token.value }; }
+    if (token.type === "uservar") { pos += 1; return { type: "uservar", name: token.value }; }
+    if (token.type === "sysvar") { pos += 1; return { type: "sysvar", name: token.value }; }
+
+    if (token.type === "ident") {
+      pos += 1;
+      if (consume("op", "(")) {
+        const lower = token.value.toLowerCase();
+        let distinct = false;
+        if (consume("kw", "DISTINCT")) distinct = true;
+        const args = [];
+        if (!(peek() && peek().type === "op" && peek().value === ")")) {
+          if (peek() && peek().type === "op" && peek().value === "*") {
+            pos += 1;
+            args.push({ type: "star" });
+          } else {
+            args.push(parseOr());
+            while (consume("op", ",")) args.push(parseOr());
+          }
+        }
+        expect("op", ")");
+        if (AGGREGATE_FUNCTIONS.has(lower)) {
+          return { type: "aggregate", name: lower, distinct, arguments: args };
+        }
+        return { type: "call", name: lower, arguments: args };
+      }
+      if (consume("op", ".")) {
+        const next = expect("ident");
+        return { type: "column", table: token.value, name: next.value };
+      }
+      return { type: "column", name: token.value };
+    }
+
+    throw new SqlError(`Unexpected token '${token.value}' in expression`);
+  }
+
+  const ast = parseOr();
+  if (pos < tokens.length) throw new SqlError(`Unexpected trailing tokens in expression near '${tokens[pos].value}'`);
+  return ast;
+}
+
+function compileExpression(input) {
+  return parseExpression(tokenizeExpression(input));
+}
+
+function evaluateExpression(node, context = {}) {
+  if (!node) return null;
+  switch (node.type) {
+    case "literal":
+      return node.value;
+    case "column": {
+      const row = context.row || {};
+      if (node.name in row) return row[node.name];
+      const lower = node.name.toLowerCase();
+      const match = Object.keys(row).find((key) => key.toLowerCase() === lower);
+      if (match) return row[match];
+      if (context.allowMissingColumns) return null;
+      throw new SqlError(`Unknown column '${node.name}' in expression`);
+    }
+    case "uservar":
+      return state.userVariables ? state.userVariables[node.name.toLowerCase()] ?? null : null;
+    case "sysvar":
+      return state.variables ? state.variables[node.name.toLowerCase()] ?? null : null;
+    case "unary": {
+      const value = evaluateExpression(node.argument, context);
+      if (value === null || value === undefined) return null;
+      return node.op === "-" ? -Number(value) : Number(value);
+    }
+    case "not":
+      return !isTruthy(evaluateExpression(node.argument, context));
+    case "logical": {
+      const left = evaluateExpression(node.left, context);
+      if (node.op === "AND") return isTruthy(left) && isTruthy(evaluateExpression(node.right, context));
+      return isTruthy(left) || isTruthy(evaluateExpression(node.right, context));
+    }
+    case "binop": {
+      const left = evaluateExpression(node.left, context);
+      const right = evaluateExpression(node.right, context);
+      if (left === null || right === null) return null;
+      switch (node.op) {
+        case "+": return Number(left) + Number(right);
+        case "-": return Number(left) - Number(right);
+        case "*": return Number(left) * Number(right);
+        case "/": return Number(right) === 0 ? null : Number(left) / Number(right);
+        case "%": case "MOD": return Number(right) === 0 ? null : Number(left) % Number(right);
+        case "DIV": return Math.trunc(Number(left) / Number(right));
+        default: throw new SqlError(`Unsupported operator '${node.op}'`);
+      }
+    }
+    case "compare": {
+      if (node.op === ":=") {
+        if (node.left.type !== "uservar") throw new SqlError("Left side of := must be a user variable");
+        const right = evaluateExpression(node.right, context);
+        if (!state.userVariables) state.userVariables = {};
+        state.userVariables[node.left.name.toLowerCase()] = right;
+        return right;
+      }
+      const left = evaluateExpression(node.left, context);
+      const right = evaluateExpression(node.right, context);
+      if (left === null || right === null) return null;
+      switch (node.op) {
+        case "=": return compareValues(left, right) === 0;
+        case "!=": case "<>": return compareValues(left, right) !== 0;
+        case "<": return compareValues(left, right) < 0;
+        case "<=": return compareValues(left, right) <= 0;
+        case ">": return compareValues(left, right) > 0;
+        case ">=": return compareValues(left, right) >= 0;
+        default: return false;
+      }
+    }
+    case "isnull": {
+      const value = evaluateExpression(node.argument, context);
+      const isNull = value === null || value === undefined;
+      return node.negated ? !isNull : isNull;
+    }
+    case "isbool": {
+      const value = evaluateExpression(node.argument, context);
+      const matches = node.value ? isTruthy(value) : !isTruthy(value);
+      return node.negated ? !matches : matches;
+    }
+    case "in": {
+      const value = evaluateExpression(node.argument, context);
+      if (value === null) return null;
+      return node.list.some((item) => {
+        const candidate = evaluateExpression(item, context);
+        return compareValues(value, candidate) === 0;
+      });
+    }
+    case "between": {
+      const value = evaluateExpression(node.argument, context);
+      const lower = evaluateExpression(node.lower, context);
+      const upper = evaluateExpression(node.upper, context);
+      if (value === null || lower === null || upper === null) return null;
+      return compareValues(value, lower) >= 0 && compareValues(value, upper) <= 0;
+    }
+    case "like": {
+      const value = evaluateExpression(node.left, context);
+      const pattern = evaluateExpression(node.right, context);
+      if (value === null || pattern === null) return null;
+      const regex = String(pattern).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
+      return new RegExp(`^${regex}$`, "i").test(String(value));
+    }
+    case "case": {
+      if (node.target) {
+        const target = evaluateExpression(node.target, context);
+        for (const branch of node.branches) {
+          const candidate = evaluateExpression(branch.condition, context);
+          if (compareValues(target, candidate) === 0) return evaluateExpression(branch.result, context);
+        }
+      } else {
+        for (const branch of node.branches) {
+          if (isTruthy(evaluateExpression(branch.condition, context))) return evaluateExpression(branch.result, context);
+        }
+      }
+      return node.fallback ? evaluateExpression(node.fallback, context) : null;
+    }
+    case "aggregate": {
+      const groupRows = context.groupRows || (context.row ? [context.row] : []);
+      let values = node.arguments.length === 0 || node.arguments[0].type === "star"
+        ? groupRows.map(() => 1)
+        : groupRows.map((row) => evaluateExpression(node.arguments[0], { ...context, row }));
+      if (node.distinct) {
+        const seen = new Set();
+        values = values.filter((v) => {
+          const key = JSON.stringify(v);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+      switch (node.name) {
+        case "count":
+          return node.arguments.length === 0 || node.arguments[0].type === "star"
+            ? values.length
+            : values.filter((v) => v !== null && v !== undefined).length;
+        case "sum": return values.filter((v) => v !== null && v !== undefined).reduce((acc, v) => acc + Number(v), 0);
+        case "avg": {
+          const valid = values.filter((v) => v !== null && v !== undefined).map(Number);
+          return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+        }
+        case "min": {
+          let result = null;
+          for (const v of values) {
+            if (v === null || v === undefined) continue;
+            if (result === null || compareValues(v, result) < 0) result = v;
+          }
+          return result;
+        }
+        case "max": {
+          let result = null;
+          for (const v of values) {
+            if (v === null || v === undefined) continue;
+            if (result === null || compareValues(v, result) > 0) result = v;
+          }
+          return result;
+        }
+        case "group_concat":
+          return values.filter((v) => v !== null && v !== undefined).join(",");
+        default:
+          throw new SqlError(`Unsupported aggregate '${node.name}'`);
+      }
+    }
+    case "call": {
+      const fn = SCALAR_FUNCTIONS[node.name];
+      if (!fn) {
+        const userFn = state.functions && state.functions[node.name.toLowerCase()];
+        if (userFn) {
+          const args = node.arguments.map((arg) => evaluateExpression(arg, context));
+          return runStoredFunction(userFn, args);
+        }
+        throw new SqlError(`Unsupported function '${node.name}'`);
+      }
+      const args = node.arguments.map((arg) => arg.type === "star" ? "*" : evaluateExpression(arg, context));
+      return fn(...args);
+    }
+    case "star":
+      return "*";
+    default:
+      throw new SqlError(`Unsupported expression node '${node.type}'`);
+  }
+}
+
+function expressionDisplay(input) {
+  return String(input || "").replace(/\s+/g, " ").trim();
+}
+
+function parseLiteral(value) {
+  const raw = String(value || "").trim();
+  if (/^null$/i.test(raw)) return null;
+  if (/^true$/i.test(raw)) return true;
+  if (/^false$/i.test(raw)) return false;
+  if (/^now\(\)$/i.test(raw) || /^current_timestamp(\(\))?$/i.test(raw)) return formatDateTime(new Date());
+  if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+    return raw.slice(1, -1).replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  if (/^@@/.test(raw)) return state.variables?.[raw.slice(2).toLowerCase()] ?? null;
+  if (/^@/.test(raw)) return state.userVariables?.[raw.slice(1).toLowerCase()] ?? null;
+  try {
+    return evaluateExpression(compileExpression(raw), { allowMissingColumns: true });
+  } catch {
+    return stripTicks(raw);
+  }
+}
+
+function evaluateLiteral(value) { return parseLiteral(value); }
 
 function formatDateTime(date) {
   const pad = (number) => String(number).padStart(2, "0");
@@ -1264,6 +1955,7 @@ function executeStatement(statement) {
   const compact = sql.replace(/\s+/g, " ");
 
   if (/^help$/i.test(compact)) return makeTable(statement, ["category", "commands"], helpRows.map(([category, commands]) => ({ category, commands })));
+  if (/^delimiter\b/i.test(compact)) return makeMessage(statement, "Delimiter handled by client splitter");
   if (/^use\s+/i.test(compact)) return executeUse(statement, compact);
   if (/^show\s+/i.test(compact)) return executeShow(statement, compact);
   if (/^(describe|desc)\s+/i.test(compact)) return executeDescribe(statement, compact);
@@ -1277,6 +1969,11 @@ function executeStatement(statement) {
   if (/^alter\s+table\s+/i.test(compact)) return executeAlterTable(statement, compact);
   if (/^create\s+(unique\s+)?index\s+/i.test(compact)) return executeCreateIndex(statement, compact);
   if (/^drop\s+index\s+/i.test(compact)) return executeDropIndex(statement, compact);
+  if (/^create\s+(definer\s*=\s*[^\s]+\s+)?procedure\s+/i.test(compact)) return executeCreateProcedure(statement, sql);
+  if (/^create\s+(definer\s*=\s*[^\s]+\s+)?function\s+/i.test(compact)) return executeCreateFunction(statement, sql);
+  if (/^drop\s+procedure\s+/i.test(compact)) return executeDropProcedure(statement, compact);
+  if (/^drop\s+function\s+/i.test(compact)) return executeDropFunction(statement, compact);
+  if (/^call\s+/i.test(compact)) return executeCall(statement, compact);
   if (/^insert\s+into\s+/i.test(compact)) return executeInsert(statement, sql);
   if (/^select\s+/i.test(compact)) return executeSelect(statement, sql);
   if (/^update\s+/i.test(compact)) return executeUpdate(statement, sql);
@@ -1284,8 +1981,8 @@ function executeStatement(statement) {
   if (/^(begin|start\s+transaction)$/i.test(compact)) return executeBegin(statement);
   if (/^commit$/i.test(compact)) return executeCommit(statement);
   if (/^rollback$/i.test(compact)) return executeRollback(statement);
-  if (/^set\s+/i.test(compact)) return executeSet(statement, compact);
-  if (/^(grant|revoke|lock\s+tables|unlock\s+tables|analyze\s+table|optimize\s+table)\b/i.test(compact)) {
+  if (/^set\s+/i.test(compact)) return executeSet(statement, sql);
+  if (/^(grant|revoke|lock\s+tables|unlock\s+tables|analyze\s+table|optimize\s+table|flush\b)/i.test(compact)) {
     return makeMessage(statement, "语法已识别：此类管理指令在模拟器中返回成功，不改变真实权限或存储状态");
   }
 
@@ -1354,6 +2051,58 @@ function executeShow(statement, compact) {
       { Variable_name: "Transaction_active", Value: state.transactionSnapshot ? "ON" : "OFF" }
     ];
     return makeTable(statement, ["Variable_name", "Value"], rows);
+  }
+
+  const procStatus = compact.match(/^show\s+procedure\s+status(?:\s+where\s+([\s\S]+))?$/i);
+  if (procStatus) {
+    const rows = Object.values(state.procedures || {}).map((proc) => ({
+      Db: proc.database,
+      Name: proc.name,
+      Type: "PROCEDURE",
+      Definer: "simulator@localhost",
+      Modified: proc.createdAt,
+      Created: proc.createdAt,
+      Security_type: "DEFINER",
+      Comment: ""
+    }));
+    return makeTable(statement, ["Db", "Name", "Type", "Definer", "Modified", "Created", "Security_type", "Comment"], rows);
+  }
+
+  const funcStatus = compact.match(/^show\s+function\s+status(?:\s+where\s+([\s\S]+))?$/i);
+  if (funcStatus) {
+    const rows = Object.values(state.functions || {}).map((fn) => ({
+      Db: fn.database,
+      Name: fn.name,
+      Type: "FUNCTION",
+      Definer: "simulator@localhost",
+      Modified: fn.createdAt,
+      Created: fn.createdAt,
+      Security_type: "DEFINER",
+      Comment: fn.returnType
+    }));
+    return makeTable(statement, ["Db", "Name", "Type", "Definer", "Modified", "Created", "Security_type", "Comment"], rows);
+  }
+
+  const showCreateProc = compact.match(/^show\s+create\s+procedure\s+([`"\w]+)$/i);
+  if (showCreateProc) {
+    const proc = state.procedures && state.procedures[normalizeIdentifier(showCreateProc[1]).toLowerCase()];
+    if (!proc) throw new SqlError(`Procedure '${showCreateProc[1]}' does not exist`);
+    const params = proc.parameters.map((p) => `${p.mode === "IN" ? "" : p.mode + " "}${p.name} ${p.type}`).join(", ");
+    return makeTable(statement, ["Procedure", "Create Procedure"], [{
+      Procedure: proc.name,
+      "Create Procedure": `CREATE PROCEDURE \`${proc.name}\` (${params}) ${proc.body}`
+    }]);
+  }
+
+  const showCreateFn = compact.match(/^show\s+create\s+function\s+([`"\w]+)$/i);
+  if (showCreateFn) {
+    const fn = state.functions && state.functions[normalizeIdentifier(showCreateFn[1]).toLowerCase()];
+    if (!fn) throw new SqlError(`Function '${showCreateFn[1]}' does not exist`);
+    const params = fn.parameters.map((p) => `${p.name} ${p.type}`).join(", ");
+    return makeTable(statement, ["Function", "Create Function"], [{
+      Function: fn.name,
+      "Create Function": `CREATE FUNCTION \`${fn.name}\` (${params}) RETURNS ${fn.returnType} ${fn.body}`
+    }]);
   }
 
   throw new SqlError(`Unsupported SHOW command: ${compact}`);
@@ -1631,20 +2380,35 @@ function executeInsert(statement, sql) {
   const columns = match[2] ? splitTopLevel(match[2]).map(normalizeIdentifier) : table.columns.map((column) => column.name);
   const valueGroups = parseValueGroups(match[3]);
 
+  let lastInsertId = state._lastInsertId || 0;
   valueGroups.forEach((group) => {
     if (group.length !== columns.length) throw new SqlError("Column count doesn't match value count");
     const row = {};
     table.columns.forEach((column) => {
-      row[column.name] = column.extra === "auto_increment" ? table.autoIncrement++ : materializeDefault(column);
+      if (column.extra === "auto_increment") {
+        row[column.name] = table.autoIncrement++;
+        lastInsertId = row[column.name];
+      } else {
+        row[column.name] = materializeDefault(column);
+      }
     });
     columns.forEach((columnName, index) => {
       if (!table.columns.some((column) => column.name === columnName)) throw new SqlError(`Unknown column '${columnName}'`);
-      row[columnName] = parseLiteral(group[index]);
+      const expressionText = group[index];
+      let value;
+      try {
+        value = evaluateExpression(compileExpression(expressionText), { allowMissingColumns: true });
+      } catch {
+        value = parseLiteral(expressionText);
+      }
+      row[columnName] = value;
     });
     validateRow(table, row);
     table.rows.push(row);
   });
 
+  state._lastInsertId = lastInsertId;
+  state._rowCount = valueGroups.length;
   return makeMessage(statement, `Query OK, ${valueGroups.length} row${valueGroups.length === 1 ? "" : "s"} affected`, { affectedRows: valueGroups.length });
 }
 
@@ -1697,93 +2461,181 @@ function executeSelect(statement, sql) {
   const scalarResult = executeScalarSelect(statement, sql);
   if (scalarResult) return scalarResult;
 
-  const match = sql.match(/^select\s+([\s\S]+?)\s+from\s+([`"\w]+)(?:\s+where\s+([\s\S]+?))?(?:\s+order\s+by\s+([`"\w]+)(?:\s+(asc|desc))?)?(?:\s+limit\s+(\d+))?$/i);
-  if (!match) throw new SqlError("SELECT syntax error. The simulator supports SELECT columns FROM table [WHERE ...] [ORDER BY col] [LIMIT n]");
+  const match = sql.match(/^select\s+(distinct\s+)?([\s\S]+?)\s+from\s+([`"\w]+)(?:\s+(?:as\s+)?([`"\w]+))?(?:\s+where\s+([\s\S]+?))?(?:\s+group\s+by\s+([\s\S]+?))?(?:\s+having\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+)(?:\s*,\s*(\d+))?)?$/i);
+  if (!match) throw new SqlError("SELECT syntax error. The simulator supports SELECT [DISTINCT] columns FROM table [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT n[,m]]");
 
-  const selected = match[1].trim();
-  const table = getTable(match[2]);
-  const where = match[3]?.trim();
-  const orderBy = match[4] ? normalizeIdentifier(match[4]) : null;
-  const orderDirection = (match[5] || "asc").toLowerCase();
-  const limit = match[6] ? Number(match[6]) : null;
-  let rows = table.rows.filter((row) => matchesWhere(row, where));
+  const distinct = Boolean(match[1]);
+  const selected = match[2].trim();
+  const table = getTable(match[3]);
+  const whereExpr = match[5] ? compileExpression(match[5].trim()) : null;
+  const groupByText = match[6] ? match[6].trim() : null;
+  const havingExpr = match[7] ? compileExpression(match[7].trim()) : null;
+  const orderText = match[8] ? match[8].trim() : null;
+  const limit = match[9] !== undefined ? Number(match[9]) : null;
+  const offset = match[10] !== undefined ? Number(match[9]) : 0;
+  const limitCount = match[10] !== undefined ? Number(match[10]) : limit;
 
-  if (orderBy) {
-    rows = rows.slice().sort((a, b) => compareValues(a[orderBy], b[orderBy]) * (orderDirection === "desc" ? -1 : 1));
-  }
+  let rows = whereExpr ? table.rows.filter((row) => isTruthy(evaluateExpression(whereExpr, { row }))) : table.rows.slice();
 
-  if (limit !== null) rows = rows.slice(0, limit);
+  const projections = parseSelectList(selected, table);
+  const hasAggregate = projections.some((item) => containsAggregate(item.expression)) || Boolean(groupByText) || Boolean(havingExpr && containsAggregate(havingExpr));
 
-  if (/^count\s*\(\s*\*\s*\)$/i.test(selected)) {
-    return makeTable(statement, ["count(*)"], [{ "count(*)": rows.length }]);
-  }
+  let resultRows;
+  let resultColumns = projections.map((item) => item.alias);
 
-  let columns;
-  if (selected === "*") {
-    columns = table.columns.map((column) => column.name);
+  if (hasAggregate) {
+    const groupKeys = groupByText ? splitTopLevel(groupByText).map((part) => compileExpression(part.trim())) : [];
+    const groups = new Map();
+    rows.forEach((row) => {
+      const key = groupKeys.length === 0
+        ? "__all__"
+        : JSON.stringify(groupKeys.map((expr) => evaluateExpression(expr, { row })));
+      if (!groups.has(key)) groups.set(key, { rows: [], sample: row });
+      groups.get(key).rows.push(row);
+    });
+    if (groupKeys.length === 0 && groups.size === 0) groups.set("__all__", { rows: [], sample: {} });
+    resultRows = [];
+    for (const group of groups.values()) {
+      if (havingExpr && !isTruthy(evaluateExpression(havingExpr, { row: group.sample, groupRows: group.rows }))) continue;
+      const row = {};
+      projections.forEach((item) => {
+        row[item.alias] = evaluateExpression(item.expression, { row: group.sample, groupRows: group.rows });
+      });
+      resultRows.push(row);
+    }
   } else {
-    columns = splitTopLevel(selected).map((item) => {
-      const asMatch = item.match(/^([`"\w]+)(?:\s+as\s+[`"]?([\w]+)[`"]?)?$/i);
-      if (!asMatch) throw new SqlError(`Unsupported SELECT expression '${item}'`);
-      const source = normalizeIdentifier(asMatch[1]);
-      if (!table.columns.some((column) => column.name === source)) throw new SqlError(`Unknown column '${source}'`);
-      return { source, alias: asMatch[2] || source };
+    resultRows = rows.map((row) => {
+      const out = {};
+      projections.forEach((item) => {
+        if (item.expression.type === "star") {
+          table.columns.forEach((column) => { out[column.name] = row[column.name]; });
+        } else {
+          out[item.alias] = evaluateExpression(item.expression, { row });
+        }
+      });
+      return out;
+    });
+    if (projections.some((item) => item.expression.type === "star")) {
+      const allColumns = [];
+      projections.forEach((item) => {
+        if (item.expression.type === "star") table.columns.forEach((c) => allColumns.push(c.name));
+        else allColumns.push(item.alias);
+      });
+      resultColumns = allColumns;
+    }
+  }
+
+  if (orderText) {
+    const orders = splitTopLevel(orderText).map((part) => {
+      const segments = part.trim().split(/\s+/);
+      const direction = /^(asc|desc)$/i.test(segments[segments.length - 1]) ? segments.pop().toLowerCase() : "asc";
+      return { expression: compileExpression(segments.join(" ")), direction };
+    });
+    resultRows = resultRows.slice().sort((a, b) => {
+      for (const order of orders) {
+        const left = evaluateExpression(order.expression, { row: a });
+        const right = evaluateExpression(order.expression, { row: b });
+        const cmp = compareValues(left, right);
+        if (cmp !== 0) return order.direction === "desc" ? -cmp : cmp;
+      }
+      return 0;
     });
   }
 
-  const resultRows = columns.map ? rows.map((row) => {
-    if (typeof columns[0] === "string") {
-      return Object.fromEntries(columns.map((column) => [column, row[column]]));
-    }
-    return Object.fromEntries(columns.map((column) => [column.alias, row[column.source]]));
-  }) : [];
-  const resultColumns = typeof columns[0] === "string" ? columns : columns.map((column) => column.alias);
+  if (distinct) {
+    const seen = new Set();
+    resultRows = resultRows.filter((row) => {
+      const key = JSON.stringify(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  if (limit !== null) {
+    resultRows = match[10] !== undefined ? resultRows.slice(offset, offset + limitCount) : resultRows.slice(0, limit);
+  }
+
+  state._foundRows = resultRows.length;
   return makeTable(statement, resultColumns, resultRows);
+}
+
+function parseSelectList(input, table) {
+  const items = splitTopLevel(input);
+  return items.map((item, index) => {
+    const text = item.trim();
+    if (text === "*") return { alias: "*", expression: { type: "star" } };
+    const aliasMatch = text.match(/^([\s\S]+?)\s+as\s+[`"]?([\w]+)[`"]?$/i) || text.match(/^([\s\S]+?)\s+([`"]?[A-Za-z_][\w]*[`"]?)$/);
+    let body = text;
+    let alias = null;
+    if (aliasMatch) {
+      const candidate = aliasMatch[2].replace(/[`"]/g, "");
+      const reserved = ["FROM", "WHERE", "GROUP", "ORDER", "LIMIT", "HAVING", "AS"];
+      if (!reserved.includes(candidate.toUpperCase()) && /^[A-Za-z_][\w]*$/.test(candidate) && /\s+as\s+/i.test(text)) {
+        body = aliasMatch[1].trim();
+        alias = candidate;
+      }
+    }
+    const expression = compileExpression(body);
+    if (!alias) {
+      if (expression.type === "column") alias = expression.name;
+      else alias = expressionDisplay(body) || `expr_${index + 1}`;
+    }
+    if (expression.type === "column" && table) {
+      if (!table.columns.some((column) => column.name.toLowerCase() === expression.name.toLowerCase())) {
+        throw new SqlError(`Unknown column '${expression.name}'`);
+      }
+    }
+    return { alias, expression };
+  });
+}
+
+function containsAggregate(node) {
+  if (!node || typeof node !== "object") return false;
+  if (node.type === "aggregate") return true;
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if (Array.isArray(value)) {
+      if (value.some(containsAggregate)) return true;
+    } else if (value && typeof value === "object") {
+      if (containsAggregate(value)) return true;
+    }
+  }
+  return false;
 }
 
 function executeScalarSelect(statement, sql) {
   const compact = sql.replace(/\s+/g, " ").trim();
-  const functions = [
-    {
-      regex: /^select\s+version\(\)$/i,
-      columns: ["VERSION()"],
-      row: { "VERSION()": "8.0.36-simulator" }
-    },
-    {
-      regex: /^select\s+database\(\)$/i,
-      columns: ["DATABASE()"],
-      row: { "DATABASE()": state.currentDatabase || null }
-    },
-    {
-      regex: /^select\s+now\(\)$/i,
-      columns: ["NOW()"],
-      row: { "NOW()": formatDateTime(new Date()) }
-    },
-    {
-      regex: /^select\s+user\(\)$/i,
-      columns: ["USER()"],
-      row: { "USER()": "simulator@localhost" }
+  if (/\sfrom\s/i.test(compact)) return null;
+
+  const literalMatch = compact.match(/^select\s+([\s\S]+)$/i);
+  if (!literalMatch) return null;
+
+  const expressions = splitTopLevel(literalMatch[1]);
+  const row = {};
+  const columns = [];
+  expressions.forEach((expression, index) => {
+    const aliasMatch = expression.match(/^([\s\S]+?)\s+as\s+[`"]?([\w]+)[`"]?$/i);
+    const valueText = (aliasMatch ? aliasMatch[1] : expression).trim();
+    let column = aliasMatch ? aliasMatch[2] : null;
+    let value;
+    try {
+      const ast = compileExpression(valueText);
+      value = evaluateExpression(ast, { allowMissingColumns: true });
+      if (!column) {
+        if (ast.type === "column") column = ast.name;
+        else if (ast.type === "uservar") column = `@${ast.name}`;
+        else if (ast.type === "sysvar") column = `@@${ast.name}`;
+        else column = expressionDisplay(valueText) || `expr_${index + 1}`;
+      }
+    } catch (error) {
+      value = parseLiteral(valueText);
+      if (!column) column = expressionDisplay(valueText) || `expr_${index + 1}`;
     }
-  ];
-  const found = functions.find((item) => item.regex.test(compact));
-  if (found) return makeTable(statement, found.columns, [found.row]);
-
-  const literalMatch = compact.match(/^select\s+(.+)$/i);
-  if (!/\sfrom\s/i.test(compact) && literalMatch) {
-    const expressions = splitTopLevel(literalMatch[1]);
-    const row = {};
-    const columns = [];
-    expressions.forEach((expression, index) => {
-      const aliasMatch = expression.match(/^(.+?)\s+as\s+[`"]?([\w]+)[`"]?$/i);
-      const valueText = aliasMatch ? aliasMatch[1] : expression;
-      const column = aliasMatch ? aliasMatch[2] : `expr_${index + 1}`;
-      row[column] = parseLiteral(valueText);
-      columns.push(column);
-    });
-    return makeTable(statement, columns, [row]);
-  }
-
-  return null;
+    row[column] = value;
+    columns.push(column);
+  });
+  return makeTable(statement, columns, [row]);
 }
 
 function compareValues(a, b) {
@@ -1793,80 +2645,30 @@ function compareValues(a, b) {
   return a > b ? 1 : -1;
 }
 
-function matchesWhere(row, where) {
-  if (!where) return true;
-  const clauses = where.split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
-  return clauses.every((clause) => evaluateClause(row, clause));
-}
-
-function evaluateClause(row, clause) {
-  const isNullMatch = clause.match(/^([`"\w]+)\s+is\s+(not\s+)?null$/i);
-  if (isNullMatch) {
-    const value = row[normalizeIdentifier(isNullMatch[1])];
-    return isNullMatch[2] ? value !== null && value !== undefined : value === null || value === undefined;
-  }
-
-  const inMatch = clause.match(/^([`"\w]+)\s+in\s*\((.+)\)$/i);
-  if (inMatch) {
-    const value = row[normalizeIdentifier(inMatch[1])];
-    const values = splitTopLevel(inMatch[2]).map(parseLiteral);
-    return values.includes(value);
-  }
-
-  const likeMatch = clause.match(/^([`"\w]+)\s+like\s+(.+)$/i);
-  if (likeMatch) {
-    const value = String(row[normalizeIdentifier(likeMatch[1])] ?? "");
-    const pattern = String(parseLiteral(likeMatch[2])).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
-    return new RegExp(`^${pattern}$`, "i").test(value);
-  }
-
-  const match = clause.match(/^([`"\w]+)\s*(=|!=|<>|>=|<=|>|<)\s*(.+)$/i);
-  if (!match) throw new SqlError(`Unsupported WHERE clause '${clause}'`);
-  const left = row[normalizeIdentifier(match[1])];
-  const operator = match[2];
-  const right = parseLiteral(match[3]);
-
-  switch (operator) {
-    case "=":
-      return left === right;
-    case "!=":
-    case "<>":
-      return left !== right;
-    case ">":
-      return left > right;
-    case "<":
-      return left < right;
-    case ">=":
-      return left >= right;
-    case "<=":
-      return left <= right;
-    default:
-      return false;
-  }
-}
-
 function executeUpdate(statement, sql) {
   const match = sql.match(/^update\s+([`"\w]+)\s+set\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i);
   if (!match) throw new SqlError("UPDATE syntax error");
   const table = getTable(match[1]);
   const assignments = splitTopLevel(match[2]).map((part) => {
-    const item = part.match(/^([`"\w]+)\s*=\s*(.+)$/);
+    const item = part.match(/^([`"\w]+)\s*=\s*([\s\S]+)$/);
     if (!item) throw new SqlError(`Invalid assignment '${part}'`);
     const column = normalizeIdentifier(item[1]);
     if (!table.columns.some((definition) => definition.name === column)) throw new SqlError(`Unknown column '${column}'`);
-    return { column, value: parseLiteral(item[2]) };
+    return { column, expression: compileExpression(item[2]) };
   });
 
+  const whereExpr = match[3] ? compileExpression(match[3]) : null;
   let affected = 0;
   table.rows.forEach((row) => {
-    if (!matchesWhere(row, match[3])) return;
-    assignments.forEach(({ column, value }) => {
-      row[column] = value;
+    if (whereExpr && !isTruthy(evaluateExpression(whereExpr, { row }))) return;
+    assignments.forEach(({ column, expression }) => {
+      row[column] = evaluateExpression(expression, { row });
     });
     validateRow(table, row);
     affected += 1;
   });
 
+  state._rowCount = affected;
   return makeMessage(statement, `Query OK, ${affected} row${affected === 1 ? "" : "s"} affected`, { affectedRows: affected });
 }
 
@@ -1875,8 +2677,10 @@ function executeDelete(statement, sql) {
   if (!match) throw new SqlError("DELETE syntax error");
   const table = getTable(match[1]);
   const before = table.rows.length;
-  table.rows = table.rows.filter((row) => !matchesWhere(row, match[2]));
+  const whereExpr = match[2] ? compileExpression(match[2]) : null;
+  table.rows = table.rows.filter((row) => whereExpr ? !isTruthy(evaluateExpression(whereExpr, { row })) : false);
   const affected = before - table.rows.length;
+  state._rowCount = affected;
   return makeMessage(statement, `Query OK, ${affected} row${affected === 1 ? "" : "s"} affected`, { affectedRows: affected });
 }
 
@@ -1885,7 +2689,10 @@ function executeBegin(statement) {
   state.transactionSnapshot = clone({
     currentDatabase: state.currentDatabase,
     databases: state.databases,
-    variables: state.variables
+    variables: state.variables,
+    userVariables: state.userVariables || {},
+    procedures: state.procedures || {},
+    functions: state.functions || {}
   });
   return makeMessage(statement, "Query OK, transaction started");
 }
@@ -1901,16 +2708,157 @@ function executeRollback(statement) {
   state.currentDatabase = state.transactionSnapshot.currentDatabase;
   state.databases = state.transactionSnapshot.databases;
   state.variables = state.transactionSnapshot.variables;
+  state.userVariables = state.transactionSnapshot.userVariables || {};
+  state.procedures = state.transactionSnapshot.procedures || {};
+  state.functions = state.transactionSnapshot.functions || {};
   state.transactionSnapshot = null;
   return makeMessage(statement, "Query OK, transaction rolled back");
 }
 
-function executeSet(statement, compact) {
-  const match = compact.match(/^set\s+@?([A-Za-z_][\w]*)\s*=\s*(.+)$/i);
-  if (!match) throw new SqlError("SET syntax error");
-  const name = match[1];
-  state.variables[name] = String(parseLiteral(match[2]));
-  return makeMessage(statement, "Query OK, variable changed");
+function parseRoutineParameters(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return [];
+  return splitTopLevel(trimmed).map((part) => {
+    const tokens = part.trim().split(/\s+/);
+    let mode = "IN";
+    if (/^(in|out|inout)$/i.test(tokens[0])) mode = tokens.shift().toUpperCase();
+    const name = normalizeIdentifier(tokens.shift() || "");
+    const type = tokens.join(" ") || "VARCHAR(255)";
+    if (!name) throw new SqlError("Routine parameter name is required");
+    return { mode, name, type };
+  });
+}
+
+function executeCreateProcedure(statement, sql) {
+  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?procedure\s+([`"\w]+)\s*\(([\s\S]*?)\)\s*([\s\S]*)$/i);
+  if (!match) throw new SqlError("CREATE PROCEDURE syntax error");
+  const name = normalizeIdentifier(match[1]).toLowerCase();
+  const parameters = parseRoutineParameters(match[2]);
+  const body = match[3].trim();
+  if (!state.procedures) state.procedures = {};
+  state.procedures[name] = {
+    name: normalizeIdentifier(match[1]),
+    parameters,
+    body,
+    database: state.currentDatabase,
+    createdAt: new Date().toISOString()
+  };
+  return makeMessage(statement, `Procedure '${state.procedures[name].name}' registered (body stored, simulator returns mock results on CALL)`);
+}
+
+function executeCreateFunction(statement, sql) {
+  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?function\s+([`"\w]+)\s*\(([\s\S]*?)\)\s*returns\s+([A-Za-z][\w()]*)([\s\S]*)$/i);
+  if (!match) throw new SqlError("CREATE FUNCTION syntax error");
+  const name = normalizeIdentifier(match[1]).toLowerCase();
+  const parameters = parseRoutineParameters(match[2]);
+  const returnType = match[3].toUpperCase();
+  const body = match[4].trim();
+  if (!state.functions) state.functions = {};
+  state.functions[name] = {
+    name: normalizeIdentifier(match[1]),
+    parameters,
+    returnType,
+    body,
+    database: state.currentDatabase,
+    createdAt: new Date().toISOString()
+  };
+  return makeMessage(statement, `Function '${state.functions[name].name}' registered (returns mock value when called)`);
+}
+
+function executeDropProcedure(statement, compact) {
+  const match = compact.match(/^drop\s+procedure\s+(?:if\s+exists\s+)?([`"\w]+)$/i);
+  if (!match) throw new SqlError("DROP PROCEDURE syntax error");
+  const name = normalizeIdentifier(match[1]).toLowerCase();
+  const ifExists = /if\s+exists/i.test(compact);
+  if (state.procedures && state.procedures[name]) {
+    delete state.procedures[name];
+    return makeMessage(statement, "Query OK, procedure dropped");
+  }
+  if (ifExists) return makeMessage(statement, "Query OK, procedure not found");
+  throw new SqlError(`Procedure '${name}' does not exist`);
+}
+
+function executeDropFunction(statement, compact) {
+  const match = compact.match(/^drop\s+function\s+(?:if\s+exists\s+)?([`"\w]+)$/i);
+  if (!match) throw new SqlError("DROP FUNCTION syntax error");
+  const name = normalizeIdentifier(match[1]).toLowerCase();
+  const ifExists = /if\s+exists/i.test(compact);
+  if (state.functions && state.functions[name]) {
+    delete state.functions[name];
+    return makeMessage(statement, "Query OK, function dropped");
+  }
+  if (ifExists) return makeMessage(statement, "Query OK, function not found");
+  throw new SqlError(`Function '${name}' does not exist`);
+}
+
+function executeCall(statement, compact) {
+  const match = compact.match(/^call\s+([`"\w]+)\s*(?:\(([\s\S]*)\))?$/i);
+  if (!match) throw new SqlError("CALL syntax error");
+  const name = normalizeIdentifier(match[1]).toLowerCase();
+  const procedure = state.procedures && state.procedures[name];
+  if (!procedure) throw new SqlError(`Procedure '${name}' does not exist`);
+  const args = match[2]
+    ? splitTopLevel(match[2]).map((part) => evaluateExpression(compileExpression(part), { allowMissingColumns: true }))
+    : [];
+  if (!state.userVariables) state.userVariables = {};
+  procedure.parameters.forEach((param, index) => {
+    if (param.mode === "IN" || param.mode === "INOUT") {
+      state.userVariables[param.name.toLowerCase()] = args[index] ?? null;
+    }
+    if (param.mode === "OUT" || param.mode === "INOUT") {
+      if (state.userVariables[param.name.toLowerCase()] === undefined) {
+        state.userVariables[param.name.toLowerCase()] = null;
+      }
+    }
+  });
+  return makeMessage(statement, `Procedure '${procedure.name}' invoked (simulator returns mock — body stored but not executed)`, {
+    warning: procedure.body ? "stored body skipped" : ""
+  });
+}
+
+function runStoredFunction(fn, args) {
+  if (!state.userVariables) state.userVariables = {};
+  fn.parameters.forEach((param, index) => {
+    state.userVariables[param.name.toLowerCase()] = args[index] ?? null;
+  });
+  return null;
+}
+
+function executeSet(statement, sql) {
+  const body = sql.replace(/^set\s+/i, "").trim();
+  const upper = body.toUpperCase();
+  if (/^TRANSACTION\b/.test(upper) || /^SESSION\b/.test(upper) || /^GLOBAL\b/.test(upper) || /^NAMES\b/.test(upper) || /^CHARACTER\s+SET\b/.test(upper)) {
+    return makeMessage(statement, "Query OK, session option acknowledged");
+  }
+  const assignments = splitTopLevel(body);
+  if (!state.userVariables) state.userVariables = {};
+  let touched = 0;
+  assignments.forEach((assignment) => {
+    const trimmed = assignment.trim();
+    const userMatch = trimmed.match(/^@([A-Za-z_][\w]*)\s*(?::=|=)\s*([\s\S]+)$/);
+    if (userMatch) {
+      const name = userMatch[1].toLowerCase();
+      state.userVariables[name] = evaluateExpression(compileExpression(userMatch[2]), { allowMissingColumns: true });
+      touched += 1;
+      return;
+    }
+    const sysMatch = trimmed.match(/^@@(?:session\.|global\.)?([A-Za-z_][\w.]*)\s*=\s*([\s\S]+)$/i);
+    if (sysMatch) {
+      const value = evaluateExpression(compileExpression(sysMatch[2]), { allowMissingColumns: true });
+      state.variables[sysMatch[1].toLowerCase()] = value === null || value === undefined ? "" : String(value);
+      touched += 1;
+      return;
+    }
+    const sessionMatch = trimmed.match(/^([A-Za-z_][\w.]*)\s*=\s*([\s\S]+)$/);
+    if (sessionMatch) {
+      const value = evaluateExpression(compileExpression(sessionMatch[2]), { allowMissingColumns: true });
+      state.variables[sessionMatch[1].toLowerCase()] = value === null || value === undefined ? "" : String(value);
+      touched += 1;
+      return;
+    }
+    throw new SqlError(`SET syntax error near '${trimmed}'`);
+  });
+  return makeMessage(statement, `Query OK, ${touched} variable${touched === 1 ? "" : "s"} changed`);
 }
 
 function createTableSql(table) {
@@ -1945,6 +2893,20 @@ function getSchemaSummary() {
 }
 
 async function handleApi(request, response, pathname) {
+  if (request.method === "GET" && pathname === "/api/whoami") {
+    const ip = getClientIp(request);
+    jsonResponse(response, 200, {
+      ok: true,
+      ip,
+      maskedIp: maskIpAddress(ip),
+      trustProxy: TRUST_PROXY,
+      forwardedFor: request.headers["x-forwarded-for"] || null,
+      realIp: request.headers["x-real-ip"] || null,
+      seenAt: new Date().toISOString()
+    });
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/version") {
     jsonResponse(response, 200, decorateVersionForRequest(await getLatestVersionInfo()));
     return;
@@ -2174,7 +3136,7 @@ async function handleApi(request, response, pathname) {
       }
 
       const code = String(payload.code || "");
-      const interpreter = payload.interpreter === "nodejs" ? "nodejs" : "html-js";
+      const interpreter = ["nodejs", "html-preview"].includes(payload.interpreter) ? payload.interpreter : "html-js";
       const analysis = analyzeSharedJs(code, interpreter);
       if (!analysis.ok) {
         writeShareAudit("share-js.reject", request, {

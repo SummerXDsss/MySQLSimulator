@@ -30,6 +30,10 @@ const jsShareLinkInput = document.querySelector("#jsShareLinkInput");
 const jsCopyShareLinkBtn = document.querySelector("#jsCopyShareLinkBtn");
 const jsCreateShareLinkBtn = document.querySelector("#jsCreateShareLinkBtn");
 const jsShareWatermark = document.querySelector("#jsShareWatermark");
+const jsPreviewSection = document.querySelector("#jsPreviewSection");
+const jsPreviewFrame = document.querySelector("#jsPreviewFrame");
+const jsPreviewWatermark = document.querySelector("#jsPreviewWatermark");
+const jsRefreshPreviewBtn = document.querySelector("#jsRefreshPreviewBtn");
 
 const JS_TIMEOUT_MS = 2000;
 const JS_MAX_BYTES = 128 * 1024;
@@ -229,11 +233,22 @@ function setJsSettingsOpen(open) {
 }
 
 function applyInterpreterMode() {
-  const interpreter = jsPrefs.interpreter === "nodejs" ? "nodejs" : "html-js";
+  const interpreter = ["nodejs", "html-preview"].includes(jsPrefs.interpreter) ? jsPrefs.interpreter : "html-js";
   if (jsInterpreterSelect) jsInterpreterSelect.value = interpreter;
   if (jsInterpreterBadge) {
-    jsInterpreterBadge.innerHTML = `<i data-lucide="cpu"></i> ${interpreter === "nodejs" ? "NodeJS 解释器" : "HTML JS 解释器"}`;
+    const labelMap = {
+      "nodejs": "NodeJS 解释器",
+      "html-preview": "网页预览模式",
+      "html-js": "HTML JS 解释器"
+    };
+    jsInterpreterBadge.innerHTML = `<i data-lucide="cpu"></i> ${labelMap[interpreter]}`;
     window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
+  }
+  if (jsPreviewSection) {
+    jsPreviewSection.hidden = interpreter !== "html-preview";
+    if (interpreter !== "html-preview" && jsPreviewFrame) {
+      jsPreviewFrame.srcdoc = "";
+    }
   }
   updateJsHighlight();
   refreshRiskState({ showSuggestions: false });
@@ -328,10 +343,12 @@ function refreshRiskState(options = {}) {
   const extraction = extractJavaScript(jsEditor.value, jsPrefs.interpreter);
   const analysis = extraction.errors?.length
     ? { ok: false, errors: extraction.errors, warnings: [] }
-    : analyzeJavaScript(extraction.code);
+    : analyzeJavaScript(extraction.code, jsPrefs.interpreter);
   jsExtractStatus.textContent = jsPrefs.interpreter === "nodejs"
     ? "NodeJS JavaScript"
-    : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
+    : jsPrefs.interpreter === "html-preview"
+      ? "HTML 预览（含 CSS/JS）"
+      : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
   renderRisks(analysis, extraction);
   if (options.showSuggestions === false) {
     hideJsSuggestions();
@@ -549,6 +566,10 @@ function extractJavaScript(input, interpreter = jsPrefs.interpreter) {
   const warnings = [];
   let match;
 
+  if (interpreter === "html-preview") {
+    return { code: source, warnings, mode: "html-preview" };
+  }
+
   if (interpreter === "nodejs" && /<\/?[a-z][\s\S]*>/i.test(source)) {
     return {
       code: "",
@@ -592,7 +613,7 @@ function extractJavaScript(input, interpreter = jsPrefs.interpreter) {
   return { code: source.trim(), warnings, mode: "javascript" };
 }
 
-function analyzeJavaScript(code) {
+function analyzeJavaScript(code, interpreter = jsPrefs.interpreter) {
   const text = String(code ?? "");
   const errors = [];
   const warnings = [];
@@ -601,6 +622,30 @@ function analyzeJavaScript(code) {
   if (byteLength(text) > JS_MAX_BYTES) errors.push("JavaScript 内容超过 128KB 限制");
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) errors.push("检测到非法控制字符");
   if (/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\uFEFF]/.test(text)) warnings.push("检测到方向控制或零宽字符，可能影响审阅");
+
+  let scanText = text;
+  if (interpreter === "html-preview") {
+    const previewScripts = [];
+    const scriptScan = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+    let scriptMatch;
+    while ((scriptMatch = scriptScan.exec(text)) !== null) {
+      if (/\bsrc\s*=/i.test(scriptMatch[1] || "")) {
+        warnings.push("已忽略外部 script src，预览不会加载远程脚本");
+        continue;
+      }
+      previewScripts.push(scriptMatch[2]);
+    }
+    if (/<iframe\b|<frame\b|<object\b|<embed\b|<applet\b|<meta[^>]*http-equiv/i.test(text)) {
+      errors.push("禁止嵌入 iframe / object / 跳转 meta，请在预览中只使用普通 HTML/CSS");
+    }
+    if (/<form\b[^>]*action\s*=/i.test(text)) {
+      warnings.push("表单 action 在预览沙箱内不会发送请求");
+    }
+    if (/\bon[a-z]+\s*=\s*["'][^"']*\b(eval|Function|fetch|XMLHttpRequest)\b/i.test(text)) {
+      errors.push("内联事件处理器中禁止动态执行或网络请求");
+    }
+    scanText = previewScripts.join("\n");
+  }
 
   const blockedRules = [
     [/\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|Request|Response|Headers|navigator)\b/i, "禁止网络请求相关 API"],
@@ -616,8 +661,9 @@ function analyzeJavaScript(code) {
     [/\b(?:globalThis|self)\s*\.\s*(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\b|\b(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\s*\(/i, "禁止直接操作 Worker 全局通信能力"]
   ];
 
+  const target = interpreter === "html-preview" ? scanText : text;
   blockedRules.forEach(([pattern, message]) => {
-    if (pattern.test(text)) errors.push(message);
+    if (pattern.test(target)) errors.push(message);
   });
 
   if (/\bwhile\s*\(\s*true\s*\)|\bfor\s*\(\s*;\s*;\s*\)/i.test(text)) {
@@ -635,7 +681,10 @@ function renderRisks(analysis, extraction) {
   ];
 
   if (!items.length) {
-    jsRiskList.innerHTML = '<div class="share-risk ok">未检测到明显风险，代码将在 Worker 沙箱中执行。</div>';
+    const okMessage = jsPrefs.interpreter === "html-preview"
+      ? "未检测到明显风险，HTML 将在受限 iframe(allow-scripts) 中预览。"
+      : "未检测到明显风险，代码将在 Worker 沙箱中执行。";
+    jsRiskList.innerHTML = `<div class="share-risk ok">${escapeHtml(okMessage)}</div>`;
     return;
   }
 
@@ -785,7 +834,7 @@ async function loadSharedJsFromUrl() {
   if (!token) return;
   try {
     const payload = await requestJson(`/api/share/js/${encodeURIComponent(token)}`);
-    jsPrefs.interpreter = payload.interpreter === "nodejs" ? "nodejs" : "html-js";
+    jsPrefs.interpreter = ["nodejs", "html-preview"].includes(payload.interpreter) ? payload.interpreter : "html-js";
     saveJsPrefs();
     setEditorValue(payload.code, { skipHistory: true });
     applyInterpreterMode();
@@ -799,17 +848,61 @@ async function loadSharedJsFromUrl() {
   }
 }
 
+let cachedViewerIp = null;
+
+async function getViewerIp() {
+  if (cachedViewerIp) return cachedViewerIp;
+  try {
+    const data = await requestJson("/api/whoami");
+    cachedViewerIp = data.ip || data.maskedIp || "unknown";
+    return cachedViewerIp;
+  } catch {
+    cachedViewerIp = "unknown";
+    return cachedViewerIp;
+  }
+}
+
+function renderPreviewWatermark(ip) {
+  if (!jsPreviewWatermark) return;
+  const tile = `<span>${escapeHtml(`IP ${ip} · 预览仅本机可见`)}</span>`;
+  jsPreviewWatermark.innerHTML = Array.from({ length: 24 }, () => tile).join("");
+}
+
+function buildPreviewSrcdoc(html, ip) {
+  const safeIp = String(ip || "unknown").replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&#39;" }[c]));
+  const guard = `\n<script>(() => {\n  const block = (name) => () => { throw new Error("受限沙箱：" + name + " 已被禁用"); };\n  try { window.fetch = block("fetch"); } catch {}\n  try { window.XMLHttpRequest = function(){ throw new Error("受限沙箱：XMLHttpRequest 已被禁用"); }; } catch {}\n  try { window.WebSocket = function(){ throw new Error("受限沙箱：WebSocket 已被禁用"); }; } catch {}\n  try { window.EventSource = function(){ throw new Error("受限沙箱：EventSource 已被禁用"); }; } catch {}\n  try { Object.defineProperty(window, "localStorage", { get: block("localStorage") }); } catch {}\n  try { Object.defineProperty(window, "sessionStorage", { get: block("sessionStorage") }); } catch {}\n  try { Object.defineProperty(window, "indexedDB", { get: block("indexedDB") }); } catch {}\n  try { Object.defineProperty(document, "cookie", { get: () => "", set: block("document.cookie") }); } catch {}\n  try { window.eval = block("eval"); } catch {}\n  try { window.Function = function(){ throw new Error("受限沙箱：Function 构造器已被禁用"); }; } catch {}\n})();</script>\n`;
+  const watermark = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n  grid-auto-rows: 90px; align-items: center; justify-items: center;\n  color: rgba(15, 23, 42, 0.16); font-family: "JetBrains Mono", monospace;\n  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; user-select: none;\n}\n#__sqlsim_watermark__ span { transform: rotate(-22deg); }\n</style>\n<div id="__sqlsim_watermark__" aria-hidden="true">${Array.from({ length: 24 }).map(() => `<span>IP ${safeIp} · 预览仅本机可见</span>`).join("")}</div>\n`;
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${watermark}${guard}</body>`);
+  if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, `${watermark}${guard}</html>`);
+  return `${html}\n${watermark}${guard}`;
+}
+
+async function runHtmlPreview(html) {
+  if (!jsPreviewFrame) {
+    return [{ type: "error", message: "未找到预览容器" }];
+  }
+  const ip = await getViewerIp();
+  renderPreviewWatermark(ip);
+  jsPreviewFrame.srcdoc = buildPreviewSrcdoc(html, ip);
+  return [
+    { type: "info", message: `已渲染网页预览 · 访问 IP ${ip}` },
+    { type: "done", message: "预览完成（高危 API 已被沙箱拦截）" }
+  ];
+}
+
 async function runCurrentJavaScript() {
   const extraction = extractJavaScript(jsEditor.value, jsPrefs.interpreter);
   const extractionErrors = extraction.errors || [];
   const analysis = extractionErrors.length
     ? { ok: false, errors: extractionErrors, warnings: [] }
-    : analyzeJavaScript(extraction.code);
+    : analyzeJavaScript(extraction.code, jsPrefs.interpreter);
 
   renderRisks(analysis, extraction);
   jsExtractStatus.textContent = jsPrefs.interpreter === "nodejs"
     ? "NodeJS JavaScript"
-    : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
+    : jsPrefs.interpreter === "html-preview"
+      ? "HTML 预览（含 CSS/JS）"
+      : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
 
   if (!analysis.ok) {
     jsStatus.textContent = "已拦截";
@@ -818,9 +911,11 @@ async function runCurrentJavaScript() {
   }
 
   jsRunBtn.disabled = true;
-  jsStatus.textContent = "执行中";
-  renderOutput([{ type: "info", message: "Worker 沙箱执行中..." }]);
-  const lines = await runJavaScript(extraction.code);
+  jsStatus.textContent = jsPrefs.interpreter === "html-preview" ? "渲染预览中" : "执行中";
+  renderOutput([{ type: "info", message: jsPrefs.interpreter === "html-preview" ? "受限沙箱预览中..." : "Worker 沙箱执行中..." }]);
+  const lines = jsPrefs.interpreter === "html-preview"
+    ? await runHtmlPreview(extraction.code)
+    : await runJavaScript(extraction.code);
   renderOutput(lines);
   jsStatus.textContent = lines.some((line) => line.type === "error") ? "执行失败" : "执行完成";
   jsRunBtn.disabled = false;
@@ -836,6 +931,9 @@ loadSharedJsFromUrl();
 window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
 
 jsRunBtn.addEventListener("click", runCurrentJavaScript);
+jsRefreshPreviewBtn?.addEventListener("click", () => {
+  if (jsPrefs.interpreter === "html-preview") runCurrentJavaScript();
+});
 jsExampleBtn.addEventListener("click", () => {
   setEditorValue(jsExample);
   jsStatus.textContent = "已载入示例";

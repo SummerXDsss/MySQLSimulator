@@ -37,6 +37,80 @@ TRUST_PROXY: "false"
 
 如果需要完全公开更新接口，可以显式设置 `WEB_UPDATE_PUBLIC=true`，但不建议在公网服务器使用。
 
+## 反向代理（Nginx / Caddy）
+
+应用监听在 `3000` 端口、`HTTP/1.1`，没有内置 TLS。生产环境建议放在反向代理后面。要让真实访问 IP 正确出现在后台日志、`share-audit.log` 和 JS 网页预览水印里，**必须**做到两件事：
+
+1. 代理把 `X-Forwarded-For` / `X-Real-IP` 头透传给应用。
+2. 容器/进程把环境变量 `TRUST_PROXY=true` 打开，否则应用会把上游连接 IP（也就是代理自身）当作访客 IP。
+
+### Nginx
+
+```nginx
+server {
+  listen 80;
+  server_name simulator.example.com;
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  server_name simulator.example.com;
+
+  ssl_certificate     /etc/letsencrypt/live/simulator.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/simulator.example.com/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # WebSocket 不是必须，但留着不影响
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        "upgrade";
+    proxy_read_timeout 60s;
+  }
+}
+```
+
+`docker-compose.yml`（或 `docker run`）必须把这些环境变量打开：
+
+```yaml
+environment:
+  TRUST_PROXY: "true"
+  PUBLIC_BASE_URL: "https://simulator.example.com"  # 让分享链接生成 https 地址
+```
+
+### Caddy
+
+```caddyfile
+simulator.example.com {
+  encode gzip
+  reverse_proxy 127.0.0.1:3000 {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}
+```
+
+### Cloudflare / 多层代理
+
+经过 Cloudflare、阿里云 SLB、CDN 时 `X-Forwarded-For` 会带多个 IP，应用默认会读第一个。如果你前面还套了一层 Nginx，确保 Nginx 用 `$proxy_add_x_forwarded_for` 而不是直接覆盖。`/api/whoami` 可以快速验证 IP 是否被识别正确：
+
+```bash
+curl https://simulator.example.com/api/whoami
+# {"ip":"203.0.113.7","maskedIp":"203.0.***.7","trustProxy":true,"forwardedFor":"203.0.113.7","realIp":"203.0.113.7"}
+```
+
+如果 `ip` 显示成代理或 Docker 网关地址，说明 `TRUST_PROXY` 没开或代理没传 `X-Forwarded-For`。
+
+`TRUST_PROXY=false`（默认）：应用只信任直连套接字 IP，**不要**在直连公网时打开它，否则任何客户端都能伪造 `X-Forwarded-For`。
+
+
 ## GitHub 自动打包
 
 推送到 `main` / `master` 或发布 `v*.*.*` tag 后，GitHub Actions 会自动构建 Docker 镜像并推送到 GHCR：

@@ -53,6 +53,7 @@
                 <select id="jsInterpreterSelect">
                   <option value="html-js">HTML JS 解释器</option>
                   <option value="nodejs">NodeJS 解释器</option>
+                  <option value="html-preview">网页预览模式</option>
                 </select>
               </label>
             </div>
@@ -164,6 +165,26 @@
                   </button>
                 </div>
                 <div id="jsOutput" class="js-output"></div>
+              </section>
+
+              <section class="side-section js-preview-section" id="jsPreviewSection" hidden>
+                <div class="panel-title">
+                  <span><i data-lucide="monitor"></i> 网页预览（受限沙箱）</span>
+                  <button id="jsRefreshPreviewBtn" class="icon-button" type="button" aria-label="刷新预览">
+                    <i data-lucide="rotate-ccw"></i>
+                  </button>
+                </div>
+                <div class="js-preview-host">
+                  <iframe
+                    id="jsPreviewFrame"
+                    class="js-preview-frame"
+                    sandbox="allow-scripts"
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
+                    title="网页预览"
+                  ></iframe>
+                  <div id="jsPreviewWatermark" class="js-preview-watermark" aria-hidden="true"></div>
+                </div>
               </section>
             </aside>
           </div>
