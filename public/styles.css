@@ -2819,6 +2819,156 @@ h3 {
   display: none;
 }
 
+/* ───── SQL lint ───── */
+.lint-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 3;
+}
+.lint-overlay pre {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: transparent;
+  white-space: pre;
+  background: transparent;
+}
+.lint-mark {
+  position: relative;
+  padding-bottom: 2px;
+  background-repeat: no-repeat;
+  background-size: 100% 4px;
+  background-position: 0 100%;
+}
+.lint-mark.lint-error { color: var(--danger, #e11d48); background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 4px); }
+.lint-mark.lint-warning { color: #f59e0b; background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 4px); }
+.lint-mark.lint-info { color: #3b82f6; background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 4px); }
+
+.lint-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.lint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-mid);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.lint-chip:hover { border-color: var(--primary); }
+.lint-chip[aria-pressed="true"] { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+.lint-chip i { width: 14px; height: 14px; }
+.lint-chip.error { color: var(--danger, #e11d48); }
+.lint-chip.warning { color: #f59e0b; }
+.lint-chip.info { color: #3b82f6; }
+.lint-chip.ok { color: var(--success, #16a34a); }
+.lint-bar-spacer { flex: 1; }
+.lint-cursor-hint {
+  color: var(--text-light);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.lint-tooltip {
+  position: absolute;
+  z-index: 50;
+  width: min(380px, 92%);
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--text-mid);
+  box-shadow: 0 14px 36px -18px rgba(15, 23, 42, 0.4);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.lint-tooltip.visible { opacity: 1; transform: translateY(0); }
+.lint-tooltip[hidden] { display: none; }
+.lint-tooltip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.lint-tooltip-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-dark);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.lint-tooltip-badge.error { background: rgba(225, 29, 72, 0.15); color: var(--danger, #e11d48); }
+.lint-tooltip-badge.warning { background: rgba(245, 158, 11, 0.15); color: #b45309; }
+.lint-tooltip-badge.info { background: rgba(59, 130, 246, 0.15); color: #1d4ed8; }
+.lint-tooltip-rule {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-light);
+}
+.lint-tooltip-loc {
+  margin-left: auto;
+  color: var(--text-light);
+  font-size: 11px;
+}
+.lint-tooltip-msg {
+  color: var(--text-dark);
+  font-weight: 600;
+}
+.lint-tooltip-snippet {
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--editor-bg);
+  color: var(--editor-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 96px;
+  overflow: auto;
+}
+
+[data-theme="dark"] .lint-tooltip {
+  box-shadow: 0 14px 36px -18px rgba(0, 0, 0, 0.65);
+}
+
+/* External nav link (e.g. 获取正版 MySQL) */
+.nav-link-external {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font-weight: 600;
+}
+.nav-link-external i {
+  width: 14px;
+  height: 14px;
+}
+
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

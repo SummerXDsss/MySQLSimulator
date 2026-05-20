@@ -30,6 +30,10 @@
           <a href="/">介绍</a>
           <a href="#results">执行结果</a>
           <a href="#visualTable">可视化数据</a>
+          <a class="nav-link-external" href="https://www.mysql.com/" target="_blank" rel="noopener noreferrer" title="跳转到 MySQL 官方网站">
+            <i data-lucide="external-link"></i>
+            <span>获取正版 MySQL</span>
+          </a>
         </div>
         <div class="nav-tools">
           <button id="themeToggle" class="nav-tool-button" type="button" aria-label="切换深色模式">
@@ -255,7 +259,28 @@
                     <pre id="highlightLayer" aria-hidden="true"><code id="highlightCode"></code></pre>
                     <textarea id="sqlEditor" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="SQL 编辑器"></textarea>
                     <div id="suggestPanel" class="suggest-panel" hidden></div>
+                    <div id="lintTooltip" class="lint-tooltip" role="tooltip" hidden></div>
                   </div>
+                  </div>
+                  <div id="lintBar" class="lint-bar" aria-live="polite">
+                    <button type="button" class="lint-chip ok" data-lint-filter="all" aria-pressed="true">
+                      <i data-lucide="circle-check"></i>
+                      <span id="lintSummary">无问题</span>
+                    </button>
+                    <button type="button" class="lint-chip error" data-lint-filter="error" aria-pressed="false">
+                      <i data-lucide="x-circle"></i>
+                      <span><b id="lintErrorCount">0</b> 错误</span>
+                    </button>
+                    <button type="button" class="lint-chip warning" data-lint-filter="warning" aria-pressed="false">
+                      <i data-lucide="alert-triangle"></i>
+                      <span><b id="lintWarningCount">0</b> 警告</span>
+                    </button>
+                    <button type="button" class="lint-chip info" data-lint-filter="info" aria-pressed="false">
+                      <i data-lucide="lightbulb"></i>
+                      <span><b id="lintInfoCount">0</b> 提示</span>
+                    </button>
+                    <span class="lint-bar-spacer"></span>
+                    <span id="lintCursorHint" class="lint-cursor-hint">将光标移到带波浪线的代码上查看建议</span>
                   </div>
                 </div>
 

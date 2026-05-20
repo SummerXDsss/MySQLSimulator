@@ -289,6 +289,445 @@ function renderShareRisks(analysis, serverWarnings = []) {
   `;
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// SQL Lint engine
+// ────────────────────────────────────────────────────────────────────────
+
+const lintBar = document.querySelector("#lintBar");
+const lintTooltip = document.querySelector("#lintTooltip");
+const lintSummaryEl = document.querySelector("#lintSummary");
+const lintErrorCountEl = document.querySelector("#lintErrorCount");
+const lintWarningCountEl = document.querySelector("#lintWarningCount");
+const lintInfoCountEl = document.querySelector("#lintInfoCount");
+
+const MYSQL_RESERVED_WORDS = new Set([
+  "ACCESSIBLE","ADD","ALL","ALTER","ANALYZE","AND","AS","ASC","ASENSITIVE","BEFORE","BETWEEN","BIGINT","BINARY","BLOB","BOTH","BY",
+  "CALL","CASCADE","CASE","CHANGE","CHAR","CHARACTER","CHECK","COLLATE","COLUMN","CONDITION","CONSTRAINT","CONTINUE","CONVERT","CREATE","CROSS","CUBE","CUME_DIST","CURRENT_DATE","CURRENT_TIME","CURRENT_TIMESTAMP","CURRENT_USER","CURSOR",
+  "DATABASE","DATABASES","DAY_HOUR","DAY_MICROSECOND","DAY_MINUTE","DAY_SECOND","DEC","DECIMAL","DECLARE","DEFAULT","DELAYED","DELETE","DENSE_RANK","DESC","DESCRIBE","DETERMINISTIC","DISTINCT","DISTINCTROW","DIV","DOUBLE","DROP","DUAL",
+  "EACH","ELSE","ELSEIF","EMPTY","ENCLOSED","ESCAPED","EXISTS","EXIT","EXPLAIN","FALSE","FETCH","FIRST_VALUE","FLOAT","FOR","FORCE","FOREIGN","FROM","FULLTEXT","FUNCTION","GENERATED","GET","GRANT","GROUP","GROUPING","GROUPS",
+  "HAVING","HIGH_PRIORITY","HOUR_MICROSECOND","HOUR_MINUTE","HOUR_SECOND","IF","IGNORE","IN","INDEX","INFILE","INNER","INOUT","INSENSITIVE","INSERT","INT","INTEGER","INTERVAL","INTO","IO_AFTER_GTIDS","IO_BEFORE_GTIDS","IS","ITERATE","JOIN","JSON_TABLE",
+  "KEY","KEYS","KILL","LAG","LAST_VALUE","LATERAL","LEAD","LEADING","LEAVE","LEFT","LIKE","LIMIT","LINEAR","LINES","LOAD","LOCALTIME","LOCALTIMESTAMP","LOCK","LONG","LONGBLOB","LONGTEXT","LOOP","LOW_PRIORITY",
+  "MASTER_BIND","MASTER_SSL_VERIFY_SERVER_CERT","MATCH","MAXVALUE","MEDIUMBLOB","MEDIUMINT","MEDIUMTEXT","MIDDLEINT","MINUTE_MICROSECOND","MINUTE_SECOND","MOD","MODIFIES","NATURAL","NOT","NO_WRITE_TO_BINLOG","NTH_VALUE","NTILE","NULL","NUMERIC",
+  "OF","ON","OPTIMIZE","OPTIMIZER_COSTS","OPTION","OPTIONALLY","OR","ORDER","OUT","OUTER","OUTFILE","OVER","PARTITION","PERCENT_RANK","PRECISION","PRIMARY","PROCEDURE","PURGE",
+  "RANGE","RANK","READ","READS","READ_WRITE","REAL","RECURSIVE","REFERENCES","REGEXP","RELEASE","RENAME","REPEAT","REPLACE","REQUIRE","RESIGNAL","RESTRICT","RETURN","REVOKE","RIGHT","RLIKE","ROW","ROWS","ROW_NUMBER",
+  "SCHEMA","SCHEMAS","SECOND_MICROSECOND","SELECT","SENSITIVE","SEPARATOR","SET","SHOW","SIGNAL","SMALLINT","SPATIAL","SPECIFIC","SQL","SQLEXCEPTION","SQLSTATE","SQLWARNING","SQL_BIG_RESULT","SQL_CALC_FOUND_ROWS","SQL_SMALL_RESULT","SSL","STARTING","STORED","STRAIGHT_JOIN","SYSTEM",
+  "TABLE","TERMINATED","THEN","TINYBLOB","TINYINT","TINYTEXT","TO","TRAILING","TRIGGER","TRUE","UNDO","UNION","UNIQUE","UNLOCK","UNSIGNED","UPDATE","USAGE","USE","USING","UTC_DATE","UTC_TIME","UTC_TIMESTAMP",
+  "VALUES","VARBINARY","VARCHAR","VARCHARACTER","VARYING","VIRTUAL","WHEN","WHERE","WHILE","WINDOW","WITH","WRITE","XOR","YEAR_MONTH","ZEROFILL"
+]);
+
+const KNOWN_STATEMENT_HEADS = new Set([
+  "SELECT","INSERT","UPDATE","DELETE","CREATE","DROP","ALTER","TRUNCATE","RENAME",
+  "USE","SHOW","DESCRIBE","DESC","EXPLAIN","SET","BEGIN","START","COMMIT","ROLLBACK",
+  "GRANT","REVOKE","CALL","HELP","ANALYZE","OPTIMIZE","LOCK","UNLOCK","FLUSH","DELIMITER",
+  "WITH","DO","HANDLER","KILL","LOAD","SAVEPOINT","RELEASE","REPLACE","SIGNAL","RESIGNAL"
+]);
+
+const SQL_LINT_STATE = {
+  results: [],
+  filter: "all"
+};
+
+function offsetToPosition(text, offset) {
+  const safe = Math.max(0, Math.min(offset, text.length));
+  let line = 1;
+  let column = 1;
+  for (let index = 0; index < safe; index += 1) {
+    if (text.charCodeAt(index) === 10) { line += 1; column = 1; } else { column += 1; }
+  }
+  return { line, column };
+}
+
+function linePartial(text, offset) {
+  const start = text.lastIndexOf("\n", offset - 1) + 1;
+  const end = text.indexOf("\n", offset);
+  return text.slice(start, end === -1 ? text.length : end);
+}
+
+function lintSplitStatements(sql) {
+  const items = [];
+  let buffer = "";
+  let start = 0;
+  let quote = null;
+  let block = false;
+  let line = false;
+  let delimiter = ";";
+
+  const flush = (end) => {
+    if (buffer.trim()) items.push({ start, end, text: buffer });
+    buffer = "";
+  };
+
+  let index = 0;
+  while (index < sql.length) {
+    const directive = !quote && !block && !line && /^\s*$/.test(buffer)
+      ? sql.slice(index).match(/^[ \t]*delimiter[ \t]+(\S+)[ \t]*\r?\n?/i)
+      : null;
+    if (directive) {
+      delimiter = directive[1];
+      index += directive[0].length;
+      start = index;
+      continue;
+    }
+
+    const char = sql[index];
+    const next = sql[index + 1];
+
+    if (line) {
+      if (char === "\n") line = false;
+      buffer += char;
+      index += 1;
+      continue;
+    }
+    if (block) {
+      if (char === "*" && next === "/") { block = false; buffer += "*/"; index += 2; continue; }
+      buffer += char; index += 1; continue;
+    }
+    if (!quote && char === "-" && next === "-") { line = true; buffer += "--"; index += 2; continue; }
+    if (!quote && char === "#") { line = true; buffer += "#"; index += 1; continue; }
+    if (!quote && char === "/" && next === "*") { block = true; buffer += "/*"; index += 2; continue; }
+    if ((char === "'" || char === '"' || char === "`") && sql[index - 1] !== "\\") {
+      if (quote === char) quote = null;
+      else if (!quote) quote = char;
+    }
+    if (!quote && sql.substr(index, delimiter.length) === delimiter) {
+      flush(index);
+      index += delimiter.length;
+      start = index;
+      continue;
+    }
+    buffer += char;
+    index += 1;
+  }
+  if (buffer.trim()) items.push({ start, end: sql.length, text: buffer });
+  return items;
+}
+
+function lintSql(sql, schema) {
+  const text = String(sql ?? "");
+  const issues = [];
+  const push = (severity, ruleId, message, range) => {
+    issues.push({ severity, ruleId, message, ...range });
+  };
+
+  if (!text.trim()) {
+    SQL_LINT_STATE.results = [];
+    return [];
+  }
+
+  // — pass 1: lexical balance over the full text —
+  let blockDepth = 0;
+  let parenDepth = 0;
+  let lastBlockOpen = -1;
+  let lastParenOpen = -1;
+  let inLine = false;
+  let inBlock = false;
+  let stringQuote = null;
+  let stringStart = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const nx = text[i + 1];
+    if (inLine) { if (ch === "\n") inLine = false; continue; }
+    if (inBlock) {
+      if (ch === "*" && nx === "/") { inBlock = false; i += 1; }
+      continue;
+    }
+    if (stringQuote) {
+      if (ch === "\\") { i += 1; continue; }
+      if (ch === stringQuote) stringQuote = null;
+      continue;
+    }
+    if (ch === "-" && nx === "-") { inLine = true; i += 1; continue; }
+    if (ch === "#") { inLine = true; continue; }
+    if (ch === "/" && nx === "*") { inBlock = true; lastBlockOpen = i; i += 1; continue; }
+    if (ch === "'" || ch === '"' || ch === "`") { stringQuote = ch; stringStart = i; continue; }
+    if (ch === "(") { parenDepth += 1; lastParenOpen = i; }
+    else if (ch === ")") {
+      if (parenDepth === 0) push("error", "paren-extra", "多余的 ')'，没有匹配的 '('", { start: i, end: i + 1 });
+      else parenDepth -= 1;
+    }
+  }
+  if (parenDepth > 0 && lastParenOpen >= 0) push("error", "paren-unclosed", "未闭合的 '('，缺少匹配的 ')'", { start: lastParenOpen, end: lastParenOpen + 1 });
+  if (stringQuote) push("error", "string-unclosed", `未闭合的字符串字面量 ${stringQuote}`, { start: stringStart, end: stringStart + 1 });
+  if (inBlock) push("error", "block-comment-unclosed", "未闭合的块注释 /* … */", { start: lastBlockOpen, end: lastBlockOpen + 2 });
+
+  // — pass 2: per-statement rules —
+  const statements = lintSplitStatements(text);
+  const knownTables = new Set();
+  const tableColumns = new Map();
+  if (schema && Array.isArray(schema.databases)) {
+    schema.databases.forEach((db) => {
+      (db.tables || []).forEach((table) => {
+        knownTables.add(String(table.name).toLowerCase());
+        tableColumns.set(String(table.name).toLowerCase(), new Set((table.columns || []).map((c) => String(c.name).toLowerCase())));
+      });
+    });
+  }
+
+  statements.forEach((statement) => {
+    const trimmedRaw = statement.text;
+    const trimmed = trimmedRaw.replace(/^\s+/, "");
+    const offsetInside = trimmedRaw.length - trimmed.length;
+    const stmtStart = statement.start + offsetInside;
+    const compact = trimmed.replace(/\s+/g, " ").replace(/^[\s;]+|[\s;]+$/g, "");
+    if (!compact) return;
+
+    const headMatch = trimmed.match(/^([A-Za-z_][\w]*)/);
+    const head = headMatch ? headMatch[1].toUpperCase() : "";
+    if (head && !KNOWN_STATEMENT_HEADS.has(head)) {
+      const length = headMatch[1].length;
+      push("warning", "unknown-statement", `无法识别的语句开头 '${headMatch[1]}'，请检查关键字拼写`, { start: stmtStart, end: stmtStart + length });
+    }
+
+    // missing trailing semicolon
+    const rawEnd = statement.end;
+    const trailing = text.slice(stmtStart, rawEnd).trimEnd();
+    if (trailing && !/;$/.test(trailing) && rawEnd === text.length) {
+      const point = stmtStart + trailing.length;
+      push("info", "missing-semicolon", "建议在语句末尾加上分号 ;", { start: Math.max(stmtStart, point - 1), end: point });
+    }
+
+    // UPDATE / DELETE without WHERE
+    if (/^(update|delete\s+from)\b/i.test(compact)) {
+      const hasWhere = /\bwhere\b/i.test(compact);
+      const verb = compact.toUpperCase().startsWith("UPDATE") ? "UPDATE" : "DELETE";
+      if (!hasWhere) {
+        const length = verb.length;
+        push("error", "no-where", `${verb} 缺少 WHERE 条件——会作用于全表，请确认这是你想要的范围`, { start: stmtStart, end: stmtStart + length });
+      }
+    }
+
+    // SELECT *
+    const selectStarMatch = trimmed.match(/select\s+\*\s+from/i);
+    if (selectStarMatch && /^select\b/i.test(compact)) {
+      const at = stmtStart + selectStarMatch.index + selectStarMatch[0].toLowerCase().indexOf("*");
+      push("info", "select-star", "建议显式列出列名，避免使用 SELECT *（影响可读性与执行性能）", { start: at, end: at + 1 });
+    }
+
+    // SELECT without LIMIT (full-table scan hint)
+    if (/^select\b/i.test(compact) && !/\blimit\b/i.test(compact) && !/\bcount\s*\(/i.test(compact) && /\bfrom\b/i.test(compact)) {
+      const length = "SELECT".length;
+      push("info", "select-no-limit", "SELECT 没有 LIMIT，结果集可能很大；建议添加 LIMIT 限制返回行数", { start: stmtStart, end: stmtStart + length });
+    }
+
+    // schema-aware: unknown tables
+    const fromMatch = trimmed.match(/\bfrom\s+([`"]?)([A-Za-z_][\w$]*)\1/i);
+    if (fromMatch && /^(select|update|delete\s+from)\b/i.test(compact) && knownTables.size > 0) {
+      const tableName = fromMatch[2];
+      if (!knownTables.has(tableName.toLowerCase())) {
+        const at = stmtStart + fromMatch.index + fromMatch[0].toLowerCase().lastIndexOf(tableName.toLowerCase());
+        push("warning", "unknown-table", `表 '${tableName}' 在当前数据库 schema 中不存在`, { start: at, end: at + tableName.length });
+      } else {
+        // unknown columns inside SELECT list / WHERE / SET
+        const columnSet = tableColumns.get(tableName.toLowerCase());
+        const colsInside = compact.match(/\b([A-Za-z_][\w$]*)\b/g) || [];
+        const seen = new Set();
+        colsInside.forEach((token) => {
+          const lower = token.toLowerCase();
+          if (seen.has(lower)) return;
+          seen.add(lower);
+          if (MYSQL_RESERVED_WORDS.has(token.toUpperCase())) return;
+          if (KNOWN_STATEMENT_HEADS.has(token.toUpperCase())) return;
+          if (knownTables.has(lower)) return;
+          if (/^\d/.test(token)) return;
+          // Only flag tokens that show up as unquoted column references in WHERE/SET/SELECT projection
+          const refRegex = new RegExp(`(?:select\\s+[\\s\\S]*?\\b|where\\s+[\\s\\S]*?\\b|set\\s+[\\s\\S]*?\\b)${token}\\b`, "i");
+          if (!refRegex.test(compact)) return;
+          if (columnSet && !columnSet.has(lower)) {
+            const idx = trimmed.toLowerCase().indexOf(lower);
+            if (idx >= 0) {
+              push("info", "unknown-column", `字段 '${token}' 不在表 '${tableName}' 中（可能是别名或表达式时可忽略）`, { start: stmtStart + idx, end: stmtStart + idx + token.length });
+            }
+          }
+        });
+      }
+    }
+
+    // Reserved word used as identifier without backticks
+    const reservedRegex = /(create\s+table\s+|create\s+database\s+|alter\s+table\s+|insert\s+into\s+|from\s+|join\s+|update\s+|into\s+)([A-Za-z_][\w$]*)/gi;
+    let reservedMatch;
+    while ((reservedMatch = reservedRegex.exec(trimmed)) !== null) {
+      const ident = reservedMatch[2];
+      if (MYSQL_RESERVED_WORDS.has(ident.toUpperCase())) {
+        const at = stmtStart + reservedMatch.index + reservedMatch[1].length;
+        push("warning", "reserved-word-ident", `'${ident}' 是 MySQL 保留字，作为标识符时建议加反引号 \`${ident}\``, { start: at, end: at + ident.length });
+      }
+    }
+
+    // Mixing tabs/spaces in same line (style)
+    const tabMix = trimmedRaw.match(/^[ ]+\t|^\t+[ ]/m);
+    if (tabMix) {
+      const at = stmtStart + tabMix.index;
+      push("info", "indent-mix", "缩进混用了 Tab 和空格，建议统一使用空格", { start: at, end: at + tabMix[0].length });
+    }
+
+    // Double semicolons / weird whitespace before stmt
+    if (/;\s*;\s*$/.test(text.slice(0, statement.end))) {
+      push("info", "double-semicolon", "出现连续的分号", { start: statement.end - 1, end: statement.end });
+    }
+  });
+
+  // de-dup overlapping issues with same ruleId+range
+  const dedup = new Map();
+  for (const issue of issues) {
+    const key = `${issue.ruleId}:${issue.start}:${issue.end}`;
+    if (!dedup.has(key)) dedup.set(key, issue);
+  }
+  const finalIssues = Array.from(dedup.values()).sort((a, b) => a.start - b.start);
+  finalIssues.forEach((issue) => {
+    const pos = offsetToPosition(text, issue.start);
+    issue.line = pos.line;
+    issue.column = pos.column;
+    issue.snippet = linePartial(text, issue.start).trim().slice(0, 120);
+  });
+  SQL_LINT_STATE.results = finalIssues;
+  return finalIssues;
+}
+
+function getLintIssueAtOffset(offset) {
+  return SQL_LINT_STATE.results.find((issue) => offset >= issue.start && offset <= issue.end) || null;
+}
+
+function getLintIssuesByLine(line) {
+  return SQL_LINT_STATE.results.filter((issue) => issue.line === line);
+}
+
+function refreshLintBar() {
+  const issues = SQL_LINT_STATE.results;
+  const counts = { error: 0, warning: 0, info: 0 };
+  issues.forEach((issue) => { counts[issue.severity] = (counts[issue.severity] || 0) + 1; });
+  if (lintErrorCountEl) lintErrorCountEl.textContent = String(counts.error);
+  if (lintWarningCountEl) lintWarningCountEl.textContent = String(counts.warning);
+  if (lintInfoCountEl) lintInfoCountEl.textContent = String(counts.info);
+  if (lintSummaryEl) {
+    if (!issues.length) lintSummaryEl.textContent = "无问题";
+    else lintSummaryEl.textContent = `${issues.length} 项检查`;
+  }
+  if (lintBar) {
+    lintBar.dataset.severity = counts.error > 0 ? "error" : counts.warning > 0 ? "warning" : counts.info > 0 ? "info" : "ok";
+  }
+}
+
+function applyLintHighlightDecorations(html, sql) {
+  // Wrap each line in an absolute span so we can underline ranges. Easier: append an overlay div in the editor stack.
+  return html;
+}
+
+function buildLintOverlay() {
+  let overlay = document.querySelector("#lintOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "lintOverlay";
+    overlay.className = "lint-overlay";
+    overlay.setAttribute("aria-hidden", "true");
+    const stack = sqlEditor?.parentElement;
+    if (stack) stack.appendChild(overlay);
+  }
+  return overlay;
+}
+
+function updateLintOverlay() {
+  const overlay = buildLintOverlay();
+  if (!overlay) return;
+  const sql = sqlEditor.value;
+  if (!SQL_LINT_STATE.results.length) {
+    overlay.innerHTML = "";
+    return;
+  }
+  // Build a synthetic structure where every character is positioned identically to the textarea/highlightCode.
+  // We render an invisible mirror containing lint underline spans aligned by character.
+  let cursor = 0;
+  let html = "";
+  for (const issue of SQL_LINT_STATE.results) {
+    if (issue.start < cursor) continue;
+    html += escapeHtml(sql.slice(cursor, issue.start));
+    html += `<span class="lint-mark lint-${issue.severity}" data-lint-index="${SQL_LINT_STATE.results.indexOf(issue)}">${escapeHtml(sql.slice(issue.start, issue.end) || " ")}</span>`;
+    cursor = Math.max(issue.end, issue.start + 1);
+  }
+  html += escapeHtml(sql.slice(cursor));
+  overlay.innerHTML = `<pre><code>${html}\n</code></pre>`;
+  const pre = overlay.querySelector("pre");
+  if (pre) {
+    pre.style.transform = `translate(${-sqlEditor.scrollLeft}px, ${-sqlEditor.scrollTop}px)`;
+  }
+}
+
+function syncLintOverlayScroll() {
+  const overlay = document.querySelector("#lintOverlay pre");
+  if (overlay) overlay.style.transform = `translate(${-sqlEditor.scrollLeft}px, ${-sqlEditor.scrollTop}px)`;
+}
+
+function hideLintTooltip() {
+  if (!lintTooltip) return;
+  lintTooltip.hidden = true;
+  lintTooltip.classList.remove("visible");
+}
+
+function severityLabel(severity) {
+  return ({ error: "错误", warning: "警告", info: "建议" })[severity] || severity;
+}
+
+function showLintTooltipForPointer(event) {
+  if (!lintTooltip || !sqlEditor) return;
+  const rect = sqlEditor.getBoundingClientRect();
+  const x = event.clientX - rect.left + sqlEditor.scrollLeft;
+  const y = event.clientY - rect.top + sqlEditor.scrollTop;
+  const offset = computeOffsetFromPoint(x, y);
+  if (offset === -1) { hideLintTooltip(); return; }
+  const issue = getLintIssueAtOffset(offset);
+  if (!issue) { hideLintTooltip(); return; }
+  lintTooltip.innerHTML = `
+    <div class="lint-tooltip-head">
+      <span class="lint-tooltip-badge ${issue.severity}">${severityLabel(issue.severity)}</span>
+      <span class="lint-tooltip-rule">${escapeHtml(issue.ruleId)}</span>
+      <span class="lint-tooltip-loc">第 ${issue.line} 行 第 ${issue.column} 列</span>
+    </div>
+    <div class="lint-tooltip-msg">${escapeHtml(issue.message)}</div>
+    ${issue.snippet ? `<pre class="lint-tooltip-snippet">${escapeHtml(issue.snippet)}</pre>` : ""}
+  `;
+  lintTooltip.hidden = false;
+  lintTooltip.classList.add("visible");
+  // Position right below the pointer, clamped inside the editor stack.
+  const stack = sqlEditor.parentElement;
+  const stackRect = stack.getBoundingClientRect();
+  const tooltipWidth = lintTooltip.offsetWidth || 320;
+  const left = Math.min(Math.max(0, event.clientX - stackRect.left + 12), stackRect.width - tooltipWidth - 6);
+  const top = event.clientY - stackRect.top + 18;
+  lintTooltip.style.left = `${left}px`;
+  lintTooltip.style.top = `${top}px`;
+}
+
+function computeOffsetFromPoint(x, y) {
+  // Use a hidden mirror to measure character offsets at (x,y). Falls back to selectionStart on caret-position-from-point.
+  if (typeof document.caretPositionFromPoint === "function") {
+    const rect = sqlEditor.getBoundingClientRect();
+    const range = document.caretPositionFromPoint(rect.left + x - sqlEditor.scrollLeft, rect.top + y - sqlEditor.scrollTop);
+    if (range && range.offsetNode === sqlEditor) return range.offset;
+  }
+  if (typeof document.caretRangeFromPoint === "function") {
+    const rect = sqlEditor.getBoundingClientRect();
+    const range = document.caretRangeFromPoint(rect.left + x - sqlEditor.scrollLeft, rect.top + y - sqlEditor.scrollTop);
+    if (range) return range.startOffset;
+  }
+  return -1;
+}
+
+function runLint() {
+  lintSql(sqlEditor.value, schemaState);
+  refreshLintBar();
+  updateLintOverlay();
+}
+
+function setLintFilter(filter) {
+  SQL_LINT_STATE.filter = filter;
+  if (lintBar) {
+    lintBar.querySelectorAll("[data-lint-filter]").forEach((chip) => {
+      chip.setAttribute("aria-pressed", String(chip.dataset.lintFilter === filter));
+    });
+  }
+  updateLintOverlay();
+}
+
+
 function downloadTextFile(filename, content, mime = "text/plain;charset=utf-8") {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -626,6 +1065,7 @@ function updateHighlight() {
 function updateEditorVisuals() {
   updateLineNumbers();
   updateHighlight();
+  if (typeof runLint === "function") runLint();
 }
 
 function quoteSqlValue(value) {
@@ -1309,10 +1749,27 @@ async function bootstrap() {
 sqlEditor.addEventListener("input", () => {
   updateEditorVisuals();
   renderSuggestPanel(false);
+  runLint();
 });
 sqlEditor.addEventListener("scroll", () => {
   syncEditorScroll();
+  syncLintOverlayScroll();
+  hideLintTooltip();
 });
+
+sqlEditor.addEventListener("mousemove", showLintTooltipForPointer);
+sqlEditor.addEventListener("mouseleave", hideLintTooltip);
+sqlEditor.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideLintTooltip();
+}, true);
+
+if (lintBar) {
+  lintBar.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-lint-filter]");
+    if (!chip) return;
+    setLintFilter(chip.dataset.lintFilter);
+  });
+}
 
 sqlEditor.addEventListener("keydown", (event) => {
   if (consolePrefs.mode === "terminal" && event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
