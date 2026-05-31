@@ -40,6 +40,10 @@
             <i data-lucide="moon"></i>
             <span>深色模式</span>
           </button>
+          <button id="navAiBtn" class="nav-tool-button ai-nav-button" type="button" title="打开问 AI">
+            <i data-lucide="bot"></i>
+            <span>问 AI</span>
+          </button>
           <div class="settings-wrap">
             <button id="settingsToggle" class="nav-tool-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPanel">
               <i data-lucide="settings"></i>
@@ -79,6 +83,22 @@
                   <option value="sqlserver">SQL Server</option>
                   <option value="oracle">Oracle</option>
                 </select>
+              </label>
+              <label class="settings-field">
+                <span>AI 接口地址</span>
+                <input id="aiBaseUrlInput" type="text" placeholder="https://api.example.com" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI 请求地址</span>
+                <input id="aiRequestPathInput" type="text" placeholder="/v1/chat/completions" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI 模型</span>
+                <input id="aiModelInput" type="text" placeholder="可选" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI Key</span>
+                <input id="aiApiKeyInput" type="password" placeholder="可选，只保存在本机浏览器" autocomplete="off" />
               </label>
               <label class="switch-row">
                 <span>
@@ -230,6 +250,10 @@
                   </button>
                   </div>
                   <div class="tool-group">
+                  <button id="openAiBtn" class="tool-button" type="button" title="打开问 AI">
+                    <i data-lucide="bot"></i>
+                    <span>问 AI</span>
+                  </button>
                   <button id="loadVisualBtn" class="tool-button" type="button" title="刷新当前可视化表">
                     <i data-lucide="panel-bottom-open"></i>
                     <span>载入当前表</span>
@@ -335,6 +359,27 @@
                 <div id="suggestionList" class="suggestion-list"></div>
               </section>
 
+              <section class="assist-card ai-assistant-card">
+                <div class="panel-title">
+                  <span><i data-lucide="bot"></i> 问 AI</span>
+                  <small id="aiConfigState">未配置</small>
+                </div>
+                <textarea id="aiPromptInput" class="ai-prompt" placeholder="问 SQL、报错原因、SQLite 写法或让 AI 改写当前语句"></textarea>
+                <div class="ai-actions">
+                  <button id="askAiBtn" class="primary-small" type="button">
+                    <i data-lucide="sparkles"></i>
+                    发送
+                  </button>
+                  <button id="insertAiAnswerBtn" class="tool-button compact" type="button" hidden>
+                    <i data-lucide="corner-down-left"></i>
+                    插入回复
+                  </button>
+                </div>
+                <div id="aiResponse" class="ai-response">
+                  <div class="ai-empty">在设置里配置接口地址和请求路径后使用。</div>
+                </div>
+              </section>
+
               <section id="visual" class="builder-panel" aria-label="可视化转 SQL">
                   <div class="panel-title">
                     <i data-lucide="wand-2"></i>
@@ -433,7 +478,8 @@
               <ul class="command-list">
                 <li>CREATE / DROP / ALTER / TRUNCATE</li>
                 <li>INSERT / SELECT / UPDATE / DELETE</li>
-                <li>SHOW / DESC / EXPLAIN / USE</li>
+                <li>SHOW / DESC / EXPLAIN / PRAGMA</li>
+                <li>SQLite 支持 sqlite_master 和无分号执行</li>
                 <li>BEGIN / COMMIT / ROLLBACK</li>
                 <li>SET / HELP / 常用管理指令模拟</li>
               </ul>
@@ -528,6 +574,7 @@
     </footer>
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="/ai-assistant.js"></script>
     <script src="/app.js"></script>
     <script src="/version.js"></script>
   </body>

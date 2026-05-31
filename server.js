@@ -87,7 +87,7 @@ const SECURITY_HEADERS = {
 const helpRows = [
   ["DDL", "CREATE DATABASE, DROP DATABASE, CREATE TABLE, ALTER TABLE, DROP TABLE, TRUNCATE TABLE, RENAME TABLE, CREATE INDEX, DROP INDEX"],
   ["DML", "INSERT, SELECT, UPDATE, DELETE"],
-  ["元信息", "SHOW DATABASES, SHOW TABLES, SHOW COLUMNS, SHOW CREATE TABLE, SHOW VARIABLES, SHOW STATUS, SHOW PROCEDURE STATUS, SHOW FUNCTION STATUS, SHOW CREATE PROCEDURE/FUNCTION, DESCRIBE, EXPLAIN"],
+  ["元信息", "SHOW DATABASES, SHOW TABLES, SHOW COLUMNS, SHOW CREATE TABLE, PRAGMA table_info, SELECT name FROM sqlite_master, SHOW VARIABLES, SHOW STATUS, SHOW PROCEDURE STATUS, SHOW FUNCTION STATUS, SHOW CREATE PROCEDURE/FUNCTION, DESCRIBE, EXPLAIN"],
   ["会话", "USE, SELECT DATABASE(), SELECT VERSION(), SELECT NOW(), SELECT USER(), SET, SET @user_var, SELECT @user_var, SELECT @@system_var"],
   ["事务", "BEGIN, START TRANSACTION, COMMIT, ROLLBACK"],
   ["脚本", "DELIMITER //, CREATE PROCEDURE, CREATE FUNCTION, DROP PROCEDURE/FUNCTION, CALL（注意：模拟器仅登记元数据，不执行过程体）"],
@@ -124,6 +124,41 @@ const examples = [
     name: "表结构调整",
     description: "添加列、描述结构、删除列",
     sql: "ALTER TABLE customers ADD COLUMN source VARCHAR(40) DEFAULT 'website';\nDESC customers;\nALTER TABLE customers DROP COLUMN source;\nDESC customers;"
+  },
+  {
+    name: "SQLite 元信息",
+    description: "查看 SQLite 风格表信息和 sqlite_master",
+    sql: "PRAGMA table_info('orders');\nSELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name"
+  },
+  {
+    name: "SQLite 无分号查询",
+    description: "单条语句不写分号也能执行",
+    sql: "SELECT * FROM 'orders' WHERE status = 'paid' ORDER BY id DESC LIMIT 3"
+  },
+  {
+    name: "SQLite 单引号建表",
+    description: "使用单引号标识符、无分号和 AUTOINCREMENT",
+    sql: "CREATE TABLE 'class_scores' (\n  'id' INTEGER PRIMARY KEY AUTOINCREMENT,\n  'student' TEXT NOT NULL,\n  'score' INTEGER DEFAULT 0\n);\nINSERT INTO 'class_scores' ('student', 'score') VALUES ('Ava', 96), ('Ben', 82);\nSELECT * FROM 'class_scores' ORDER BY id"
+  },
+  {
+    name: "聚合统计",
+    description: "按订单状态分组统计数量和金额",
+    sql: "SELECT status, COUNT(*) AS order_count, SUM(total_amount) AS total_sales\nFROM orders\nGROUP BY status\nORDER BY order_count DESC"
+  },
+  {
+    name: "CASE 分级",
+    description: "用 CASE WHEN 给订单金额分级",
+    sql: "SELECT id, total_amount,\n  CASE WHEN total_amount >= 200 THEN 'high' ELSE 'normal' END AS amount_level\nFROM orders\nORDER BY id"
+  },
+  {
+    name: "变量和函数",
+    description: "模拟会话变量和常用字符串函数",
+    sql: "SET @target_city = 'Shanghai';\nSELECT @target_city AS target_city, UPPER(@target_city) AS city_upper, LENGTH(@target_city) AS city_length;\nSELECT id, name, city FROM customers WHERE city = @target_city"
+  },
+  {
+    name: "索引与建表语句",
+    description: "创建索引并查看索引和建表 SQL",
+    sql: "CREATE INDEX idx_customers_city ON customers (city);\nSHOW INDEX FROM customers;\nSHOW CREATE TABLE customers"
   }
 ];
 
@@ -1102,10 +1137,26 @@ function normalizeIdentifier(identifier) {
 
 function stripTicks(value) {
   const text = String(value || "").trim();
-  if ((text.startsWith("`") && text.endsWith("`")) || (text.startsWith('"') && text.endsWith('"'))) {
+  if (
+    (text.startsWith("`") && text.endsWith("`"))
+    || (text.startsWith('"') && text.endsWith('"'))
+    || (text.startsWith("'") && text.endsWith("'"))
+  ) {
     return text.slice(1, -1);
   }
   return text;
+}
+
+function isSqliteDialect(dialect) {
+  return String(dialect || "").trim().toLowerCase() === "sqlite";
+}
+
+function normalizeStatementForDialect(statement, options = {}) {
+  let sql = String(statement || "").trim();
+  if (!isSqliteDialect(options.dialect)) return sql;
+  sql = sql.replace(/\bAUTOINCREMENT\b/gi, "AUTO_INCREMENT");
+  sql = sql.replace(/\bIFNULL\s*\(/gi, "IFNULL(");
+  return sql;
 }
 
 class SqlError extends Error {
@@ -1915,7 +1966,7 @@ function makeTable(statement, columns, rows, extras = {}) {
   };
 }
 
-function executeSql(sql) {
+function executeSql(sql, options = {}) {
   const start = performance.now();
   const statements = splitStatements(sql);
 
@@ -1928,8 +1979,9 @@ function executeSql(sql) {
   }
 
   const results = statements.map((statement) => {
+    const preparedStatement = normalizeStatementForDialect(statement, options);
     try {
-      return executeStatement(statement);
+      return executeStatement(preparedStatement);
     } catch (error) {
       return {
         statement,
@@ -1958,6 +2010,7 @@ function executeStatement(statement) {
   if (/^delimiter\b/i.test(compact)) return makeMessage(statement, "Delimiter handled by client splitter");
   if (/^use\s+/i.test(compact)) return executeUse(statement, compact);
   if (/^show\s+/i.test(compact)) return executeShow(statement, compact);
+  if (/^pragma\s+/i.test(compact)) return executePragma(statement, compact);
   if (/^(describe|desc)\s+/i.test(compact)) return executeDescribe(statement, compact);
   if (/^explain\s+/i.test(compact)) return executeExplain(statement, compact);
   if (/^create\s+database\s+/i.test(compact)) return executeCreateDatabase(statement, compact);
@@ -1975,6 +2028,7 @@ function executeStatement(statement) {
   if (/^drop\s+function\s+/i.test(compact)) return executeDropFunction(statement, compact);
   if (/^call\s+/i.test(compact)) return executeCall(statement, compact);
   if (/^insert\s+into\s+/i.test(compact)) return executeInsert(statement, sql);
+  if (/^select\s+/i.test(compact) && /\bfrom\s+sqlite_(master|schema)\b/i.test(compact)) return executeSqliteMasterSelect(statement, sql);
   if (/^select\s+/i.test(compact)) return executeSelect(statement, sql);
   if (/^update\s+/i.test(compact)) return executeUpdate(statement, sql);
   if (/^delete\s+from\s+/i.test(compact)) return executeDelete(statement, sql);
@@ -2083,7 +2137,7 @@ function executeShow(statement, compact) {
     return makeTable(statement, ["Db", "Name", "Type", "Definer", "Modified", "Created", "Security_type", "Comment"], rows);
   }
 
-  const showCreateProc = compact.match(/^show\s+create\s+procedure\s+([`"\w]+)$/i);
+  const showCreateProc = compact.match(/^show\s+create\s+procedure\s+([`"'\w]+)$/i);
   if (showCreateProc) {
     const proc = state.procedures && state.procedures[normalizeIdentifier(showCreateProc[1]).toLowerCase()];
     if (!proc) throw new SqlError(`Procedure '${showCreateProc[1]}' does not exist`);
@@ -2094,7 +2148,7 @@ function executeShow(statement, compact) {
     }]);
   }
 
-  const showCreateFn = compact.match(/^show\s+create\s+function\s+([`"\w]+)$/i);
+  const showCreateFn = compact.match(/^show\s+create\s+function\s+([`"'\w]+)$/i);
   if (showCreateFn) {
     const fn = state.functions && state.functions[normalizeIdentifier(showCreateFn[1]).toLowerCase()];
     if (!fn) throw new SqlError(`Function '${showCreateFn[1]}' does not exist`);
@@ -2122,10 +2176,108 @@ function executeDescribe(statement, compact) {
   return makeTable(statement, ["Field", "Type", "Null", "Key", "Default", "Extra"], rows);
 }
 
+function executePragma(statement, compact) {
+  const tableInfo = compact.match(/^pragma\s+table_info\s*\(\s*([`"'\w]+)\s*\)$/i)
+    || compact.match(/^pragma\s+table_info\s+([`"'\w]+)$/i);
+  if (tableInfo) {
+    const table = getTable(tableInfo[1]);
+    const rows = table.columns.map((column, index) => ({
+      cid: index,
+      name: column.name,
+      type: column.type,
+      notnull: column.nullable ? 0 : 1,
+      dflt_value: column.default,
+      pk: column.key === "PRI" ? 1 : 0
+    }));
+    return makeTable(statement, ["cid", "name", "type", "notnull", "dflt_value", "pk"], rows);
+  }
+
+  if (/^pragma\s+database_list$/i.test(compact)) {
+    return makeTable(statement, ["seq", "name", "file"], [{ seq: 0, name: "main", file: "demo.sqlite" }]);
+  }
+
+  throw new SqlError(`Unsupported PRAGMA command: ${compact}`);
+}
+
+function createSqliteTableSql(table) {
+  const lines = table.columns.map((column) => {
+    const parts = [`"${column.name}"`, column.type || "TEXT"];
+    if (column.key === "PRI") parts.push("PRIMARY KEY");
+    if (!column.nullable) parts.push("NOT NULL");
+    if (column.extra === "auto_increment") parts.push("AUTOINCREMENT");
+    if (column.default !== null && column.default !== undefined) parts.push(`DEFAULT ${JSON.stringify(column.default)}`);
+    return parts.join(" ");
+  });
+  return `CREATE TABLE "${table.name}" (${lines.join(", ")})`;
+}
+
+function executeSqliteMasterSelect(statement, sql) {
+  const match = sql.match(/^select\s+([\s\S]+?)\s+from\s+sqlite_(?:master|schema)(?:\s+where\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+))?$/i);
+  if (!match) throw new SqlError("sqlite_master 查询暂支持 SELECT columns FROM sqlite_master [WHERE ...] [ORDER BY ...] [LIMIT n]");
+
+  const db = getCurrentDatabase();
+  const pseudoTable = {
+    columns: ["type", "name", "tbl_name", "rootpage", "sql"].map((name) => createColumn(name, "TEXT"))
+  };
+  let rows = Object.values(db.tables).map((table, index) => ({
+    type: "table",
+    name: table.name,
+    tbl_name: table.name,
+    rootpage: index + 1,
+    sql: createSqliteTableSql(table)
+  }));
+
+  if (match[2]) {
+    const whereExpr = compileExpression(match[2].trim());
+    rows = rows.filter((row) => isTruthy(evaluateExpression(whereExpr, { row })));
+  }
+
+  const projections = parseSelectList(match[1].trim(), pseudoTable);
+  let resultColumns = projections.map((item) => item.alias);
+  let resultRows = rows.map((row) => {
+    const out = {};
+    projections.forEach((item) => {
+      if (item.expression.type === "star") {
+        pseudoTable.columns.forEach((column) => { out[column.name] = row[column.name]; });
+      } else {
+        out[item.alias] = evaluateExpression(item.expression, { row });
+      }
+    });
+    return out;
+  });
+
+  if (projections.some((item) => item.expression.type === "star")) {
+    resultColumns = pseudoTable.columns.map((column) => column.name);
+  }
+
+  if (match[3]) {
+    const orders = splitTopLevel(match[3]).map((part) => {
+      const segments = part.trim().split(/\s+/);
+      const direction = /^(asc|desc)$/i.test(segments[segments.length - 1]) ? segments.pop().toLowerCase() : "asc";
+      return { expression: compileExpression(segments.join(" ")), direction };
+    });
+    resultRows = resultRows.slice().sort((a, b) => {
+      for (const order of orders) {
+        const left = evaluateExpression(order.expression, { row: a });
+        const right = evaluateExpression(order.expression, { row: b });
+        const cmp = compareValues(left, right);
+        if (cmp !== 0) return order.direction === "desc" ? -cmp : cmp;
+      }
+      return 0;
+    });
+  }
+
+  if (match[4] !== undefined) {
+    resultRows = resultRows.slice(0, Number(match[4]));
+  }
+
+  return makeTable(statement, resultColumns, resultRows);
+}
+
 function executeExplain(statement, compact) {
   const match = compact.match(/^explain\s+(.+)$/i);
   const selectSql = match?.[1] || "";
-  const fromMatch = selectSql.match(/\bfrom\s+([`"\w]+)/i);
+  const fromMatch = selectSql.match(/\bfrom\s+([`"'\w]+)/i);
   const tableName = fromMatch ? normalizeIdentifier(fromMatch[1]) : "derived";
   const table = fromMatch ? getTable(tableName) : null;
   const hasWhere = /\bwhere\b/i.test(selectSql);
@@ -2171,7 +2323,7 @@ function executeDropDatabase(statement, compact) {
 }
 
 function executeCreateTable(statement, sql) {
-  const match = sql.match(/^create\s+table(?:\s+if\s+not\s+exists)?\s+([`"\w]+)\s*\(([\s\S]+)\)$/i);
+  const match = sql.match(/^create\s+table(?:\s+if\s+not\s+exists)?\s+([`"'\w]+)\s*\(([\s\S]+)\)$/i);
   if (!match) throw new SqlError("CREATE TABLE syntax error");
   const tableName = normalizeIdentifier(match[1]);
   const ifNotExists = /^create\s+table\s+if\s+not\s+exists/i.test(sql);
@@ -2223,7 +2375,7 @@ function parseColumnDefinition(definition) {
 
   const upperTokens = tokens.map((token) => token.toUpperCase());
   let typeEnd = tokens.length;
-  const constraintWords = ["PRIMARY", "NOT", "NULL", "DEFAULT", "AUTO_INCREMENT", "UNIQUE", "KEY", "COMMENT"];
+  const constraintWords = ["PRIMARY", "NOT", "NULL", "DEFAULT", "AUTO_INCREMENT", "AUTOINCREMENT", "UNIQUE", "KEY", "COMMENT"];
   for (let index = 0; index < upperTokens.length; index += 1) {
     if (constraintWords.includes(upperTokens[index])) {
       typeEnd = index;
@@ -2235,8 +2387,8 @@ function parseColumnDefinition(definition) {
   const rest = tokens.slice(typeEnd).join(" ");
   const primary = /\bprimary\s+key\b/i.test(rest);
   const notNull = /\bnot\s+null\b/i.test(rest);
-  const autoIncrement = /\bauto_increment\b/i.test(rest);
-  const defaultMatch = rest.match(/\bdefault\s+(.+?)(?=\s+(primary|not|null|auto_increment|unique|key|comment)\b|$)/i);
+  const autoIncrement = /\b(auto_increment|autoincrement)\b/i.test(rest);
+  const defaultMatch = rest.match(/\bdefault\s+(.+?)(?=\s+(primary|not|null|auto_increment|autoincrement|unique|key|comment)\b|$)/i);
 
   return createColumn(name, type.toUpperCase(), {
     nullable: !notNull && !primary,
@@ -2274,7 +2426,7 @@ function executeTruncateTable(statement, compact) {
 }
 
 function executeRenameTable(statement, compact) {
-  const match = compact.match(/^rename\s+table\s+([`"\w]+)\s+to\s+([`"\w]+)$/i);
+  const match = compact.match(/^rename\s+table\s+([`"'\w]+)\s+to\s+([`"'\w]+)$/i);
   if (!match) throw new SqlError("RENAME TABLE syntax error");
   const db = getCurrentDatabase();
   const oldName = normalizeIdentifier(match[1]);
@@ -2288,7 +2440,7 @@ function executeRenameTable(statement, compact) {
 }
 
 function executeAlterTable(statement, compact) {
-  const match = compact.match(/^alter\s+table\s+([`"\w]+)\s+(.+)$/i);
+  const match = compact.match(/^alter\s+table\s+([`"'\w]+)\s+(.+)$/i);
   if (!match) throw new SqlError("ALTER TABLE syntax error");
   const table = getTable(match[1]);
   const action = match[2].trim();
@@ -2304,7 +2456,7 @@ function executeAlterTable(statement, compact) {
     return makeMessage(statement, "Query OK, column added");
   }
 
-  const dropMatch = action.match(/^drop\s+(?:column\s+)?([`"\w]+)$/i);
+  const dropMatch = action.match(/^drop\s+(?:column\s+)?([`"'\w]+)$/i);
   if (dropMatch) {
     const columnName = normalizeIdentifier(dropMatch[1]);
     if (!table.columns.some((column) => column.name === columnName)) throw new SqlError(`Unknown column '${columnName}'`);
@@ -2318,7 +2470,7 @@ function executeAlterTable(statement, compact) {
     return makeMessage(statement, "Query OK, column dropped");
   }
 
-  const renameMatch = action.match(/^rename\s+column\s+([`"\w]+)\s+to\s+([`"\w]+)$/i);
+    const renameMatch = action.match(/^rename\s+column\s+([`"'\w]+)\s+to\s+([`"'\w]+)$/i);
   if (renameMatch) {
     const oldName = normalizeIdentifier(renameMatch[1]);
     const newName = normalizeIdentifier(renameMatch[2]);
@@ -2348,7 +2500,7 @@ function executeAlterTable(statement, compact) {
 }
 
 function executeCreateIndex(statement, compact) {
-  const match = compact.match(/^create\s+(unique\s+)?index\s+([`"\w]+)\s+on\s+([`"\w]+)\s*\(([^)]+)\)$/i);
+  const match = compact.match(/^create\s+(unique\s+)?index\s+([`"'\w]+)\s+on\s+([`"'\w]+)\s*\(([^)]+)\)$/i);
   if (!match) throw new SqlError("CREATE INDEX syntax error");
   const table = getTable(match[3]);
   const indexName = normalizeIdentifier(match[2]);
@@ -2363,7 +2515,7 @@ function executeCreateIndex(statement, compact) {
 }
 
 function executeDropIndex(statement, compact) {
-  const match = compact.match(/^drop\s+index\s+([`"\w]+)\s+on\s+([`"\w]+)$/i);
+  const match = compact.match(/^drop\s+index\s+([`"'\w]+)\s+on\s+([`"'\w]+)$/i);
   if (!match) throw new SqlError("DROP INDEX syntax error");
   const table = getTable(match[2]);
   const indexName = normalizeIdentifier(match[1]);
@@ -2374,7 +2526,7 @@ function executeDropIndex(statement, compact) {
 }
 
 function executeInsert(statement, sql) {
-  const match = sql.match(/^insert\s+into\s+([`"\w]+)(?:\s*\(([^)]+)\))?\s+values\s*(.+)$/i);
+  const match = sql.match(/^insert\s+into\s+([`"'\w]+)(?:\s*\(([^)]+)\))?\s+values\s*(.+)$/i);
   if (!match) throw new SqlError("INSERT syntax error");
   const table = getTable(match[1]);
   const columns = match[2] ? splitTopLevel(match[2]).map(normalizeIdentifier) : table.columns.map((column) => column.name);
@@ -2461,7 +2613,7 @@ function executeSelect(statement, sql) {
   const scalarResult = executeScalarSelect(statement, sql);
   if (scalarResult) return scalarResult;
 
-  const match = sql.match(/^select\s+(distinct\s+)?([\s\S]+?)\s+from\s+([`"\w]+)(?:\s+(?:as\s+)?([`"\w]+))?(?:\s+where\s+([\s\S]+?))?(?:\s+group\s+by\s+([\s\S]+?))?(?:\s+having\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+)(?:\s*,\s*(\d+))?)?$/i);
+  const match = sql.match(/^select\s+(distinct\s+)?([\s\S]+?)\s+from\s+([`"'\w]+)(?:\s+(?:as\s+)?([`"'\w]+))?(?:\s+where\s+([\s\S]+?))?(?:\s+group\s+by\s+([\s\S]+?))?(?:\s+having\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+)(?:\s*,\s*(\d+))?)?$/i);
   if (!match) throw new SqlError("SELECT syntax error. The simulator supports SELECT [DISTINCT] columns FROM table [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT n[,m]]");
 
   const distinct = Boolean(match[1]);
@@ -2646,11 +2798,11 @@ function compareValues(a, b) {
 }
 
 function executeUpdate(statement, sql) {
-  const match = sql.match(/^update\s+([`"\w]+)\s+set\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i);
+  const match = sql.match(/^update\s+([`"'\w]+)\s+set\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i);
   if (!match) throw new SqlError("UPDATE syntax error");
   const table = getTable(match[1]);
   const assignments = splitTopLevel(match[2]).map((part) => {
-    const item = part.match(/^([`"\w]+)\s*=\s*([\s\S]+)$/);
+    const item = part.match(/^([`"'\w]+)\s*=\s*([\s\S]+)$/);
     if (!item) throw new SqlError(`Invalid assignment '${part}'`);
     const column = normalizeIdentifier(item[1]);
     if (!table.columns.some((definition) => definition.name === column)) throw new SqlError(`Unknown column '${column}'`);
@@ -2673,7 +2825,7 @@ function executeUpdate(statement, sql) {
 }
 
 function executeDelete(statement, sql) {
-  const match = sql.match(/^delete\s+from\s+([`"\w]+)(?:\s+where\s+([\s\S]+))?$/i);
+  const match = sql.match(/^delete\s+from\s+([`"'\w]+)(?:\s+where\s+([\s\S]+))?$/i);
   if (!match) throw new SqlError("DELETE syntax error");
   const table = getTable(match[1]);
   const before = table.rows.length;
@@ -2730,7 +2882,7 @@ function parseRoutineParameters(text) {
 }
 
 function executeCreateProcedure(statement, sql) {
-  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?procedure\s+([`"\w]+)\s*\(([\s\S]*?)\)\s*([\s\S]*)$/i);
+  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?procedure\s+([`"'\w]+)\s*\(([\s\S]*?)\)\s*([\s\S]*)$/i);
   if (!match) throw new SqlError("CREATE PROCEDURE syntax error");
   const name = normalizeIdentifier(match[1]).toLowerCase();
   const parameters = parseRoutineParameters(match[2]);
@@ -2747,7 +2899,7 @@ function executeCreateProcedure(statement, sql) {
 }
 
 function executeCreateFunction(statement, sql) {
-  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?function\s+([`"\w]+)\s*\(([\s\S]*?)\)\s*returns\s+([A-Za-z][\w()]*)([\s\S]*)$/i);
+  const match = sql.match(/^create\s+(?:definer\s*=\s*\S+\s+)?function\s+([`"'\w]+)\s*\(([\s\S]*?)\)\s*returns\s+([A-Za-z][\w()]*)([\s\S]*)$/i);
   if (!match) throw new SqlError("CREATE FUNCTION syntax error");
   const name = normalizeIdentifier(match[1]).toLowerCase();
   const parameters = parseRoutineParameters(match[2]);
@@ -2766,7 +2918,7 @@ function executeCreateFunction(statement, sql) {
 }
 
 function executeDropProcedure(statement, compact) {
-  const match = compact.match(/^drop\s+procedure\s+(?:if\s+exists\s+)?([`"\w]+)$/i);
+  const match = compact.match(/^drop\s+procedure\s+(?:if\s+exists\s+)?([`"'\w]+)$/i);
   if (!match) throw new SqlError("DROP PROCEDURE syntax error");
   const name = normalizeIdentifier(match[1]).toLowerCase();
   const ifExists = /if\s+exists/i.test(compact);
@@ -2779,7 +2931,7 @@ function executeDropProcedure(statement, compact) {
 }
 
 function executeDropFunction(statement, compact) {
-  const match = compact.match(/^drop\s+function\s+(?:if\s+exists\s+)?([`"\w]+)$/i);
+  const match = compact.match(/^drop\s+function\s+(?:if\s+exists\s+)?([`"'\w]+)$/i);
   if (!match) throw new SqlError("DROP FUNCTION syntax error");
   const name = normalizeIdentifier(match[1]).toLowerCase();
   const ifExists = /if\s+exists/i.test(compact);
@@ -2792,7 +2944,7 @@ function executeDropFunction(statement, compact) {
 }
 
 function executeCall(statement, compact) {
-  const match = compact.match(/^call\s+([`"\w]+)\s*(?:\(([\s\S]*)\))?$/i);
+  const match = compact.match(/^call\s+([`"'\w]+)\s*(?:\(([\s\S]*)\))?$/i);
   if (!match) throw new SqlError("CALL syntax error");
   const name = normalizeIdentifier(match[1]).toLowerCase();
   const procedure = state.procedures && state.procedures[name];
@@ -3286,7 +3438,7 @@ async function handleApi(request, response, pathname) {
     try {
       const payload = JSON.parse(await readBody(request) || "{}");
       loadRequestState(payload);
-      const result = executeSql(String(payload.sql || ""));
+      const result = executeSql(String(payload.sql || ""), { dialect: payload.dialect || payload.databaseApp });
       jsonResponse(response, 200, stateResponse(result));
     } catch (error) {
       jsonResponse(response, 400, { ok: false, message: error.message });

@@ -17,8 +17,10 @@ const sqlmFileInput = document.querySelector("#sqlmFileInput");
 const sqlFileInput = document.querySelector("#sqlFileInput");
 const copyBtn = document.querySelector("#copyBtn");
 const formatBtn = document.querySelector("#formatBtn");
+const openAiBtn = document.querySelector("#openAiBtn");
 const loadVisualBtn = document.querySelector("#loadVisualBtn");
 const themeToggle = document.querySelector("#themeToggle");
+const navAiBtn = document.querySelector("#navAiBtn");
 const settingsToggle = document.querySelector("#settingsToggle");
 const settingsPanel = document.querySelector("#settingsPanel");
 const settingsClose = document.querySelector("#settingsClose");
@@ -1267,6 +1269,67 @@ function insertSuggestion(item) {
   sqlEditor.focus();
 }
 
+function insertSqlAtSelection(text) {
+  const value = String(text || "");
+  const start = sqlEditor.selectionStart || 0;
+  const end = sqlEditor.selectionEnd || start;
+  sqlEditor.value = `${sqlEditor.value.slice(0, start)}${value}${sqlEditor.value.slice(end)}`;
+  const cursor = start + value.length;
+  sqlEditor.setSelectionRange(cursor, cursor);
+  updateEditorVisuals();
+  runLint();
+  sqlEditor.focus();
+}
+
+function buildSqlAiContext() {
+  const databaseApp = getDatabaseAppConfig();
+  const schemaSummary = schemaState?.databases?.map((database) => {
+    const tables = database.tables.map((table) => {
+      const columns = table.columns.map((column) => `${column.name} ${column.type}`).join(", ");
+      return `- ${table.name}(${columns})`;
+    }).join("\n");
+    return `数据库 ${database.name}:\n${tables || "- 空"}`;
+  }).join("\n\n") || "暂无结构信息";
+  const latestResult = results[activeResultIndex];
+  return [
+    `场景：SQLSimulator ${databaseApp.label} 学习环境`,
+    `方言：${databaseApp.dialect}`,
+    `当前模式：${modeConfigs[consolePrefs.mode]?.label || consolePrefs.mode}`,
+    `当前 SQL:\n${sqlEditor.value}`,
+    `结构信息:\n${schemaSummary}`,
+    latestResult ? `当前结果/错误：${latestResult.message || latestResult.kind}` : "当前结果：未执行"
+  ].join("\n\n");
+}
+
+function setupSqlAiAssistant() {
+  if (!window.SqlSimAiAssistant) return;
+  window.SqlSimAiAssistant.create({
+    kind: "SQL",
+    language: "sql",
+    getContext: buildSqlAiContext,
+    insertText: insertSqlAtSelection,
+    setStatus: (message) => addSystemLog("问 AI", message, !/失败/.test(message)),
+    elements: {
+      baseUrl: document.querySelector("#aiBaseUrlInput"),
+      requestPath: document.querySelector("#aiRequestPathInput"),
+      model: document.querySelector("#aiModelInput"),
+      apiKey: document.querySelector("#aiApiKeyInput"),
+      prompt: document.querySelector("#aiPromptInput"),
+      askButton: document.querySelector("#askAiBtn"),
+      insertButton: document.querySelector("#insertAiAnswerBtn"),
+      response: document.querySelector("#aiResponse"),
+      configState: document.querySelector("#aiConfigState")
+    }
+  });
+}
+
+function focusSqlAiPanel() {
+  const panel = document.querySelector(".ai-assistant-card");
+  const prompt = document.querySelector("#aiPromptInput");
+  panel?.scrollIntoView({ behavior: "smooth", block: "center" });
+  window.setTimeout(() => prompt?.focus(), 220);
+}
+
 function getFirstTable(schema) {
   const database = schema?.databases?.[0];
   const table = database?.tables?.[0];
@@ -1343,6 +1406,7 @@ async function fetchSimulatorJson(url, data = {}) {
     method: "POST",
     body: JSON.stringify({
       ...data,
+      dialect: data.dialect || consolePrefs.databaseApp,
       clientState: loadClientState()
     })
   });
@@ -1765,6 +1829,7 @@ async function importSqlm(file) {
 
 async function bootstrap() {
   initTheme();
+  setupSqlAiAssistant();
   applyConsolePrefs();
   initOnboarding();
   sqlEditor.value = defaultSql;
@@ -1862,6 +1927,7 @@ sqlEditor.addEventListener("blur", () => {
 themeToggle.addEventListener("click", () => {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 });
+navAiBtn?.addEventListener("click", focusSqlAiPanel);
 
 settingsToggle.addEventListener("click", (event) => {
   event.stopPropagation();
@@ -1975,6 +2041,7 @@ sqlmFileInput.addEventListener("change", () => {
     });
 });
 formatBtn.addEventListener("click", formatSql);
+openAiBtn?.addEventListener("click", focusSqlAiPanel);
 loadVisualBtn.addEventListener("click", loadVisualTable);
 refreshTableBtn.addEventListener("click", loadVisualTable);
 visualTableSelect.addEventListener("change", () => {

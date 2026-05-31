@@ -239,6 +239,11 @@ button {
   color: var(--primary);
 }
 
+.ai-nav-button {
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  color: var(--primary);
+}
+
 .settings-wrap {
   position: relative;
   display: inline-flex;
@@ -250,6 +255,8 @@ button {
   right: 0;
   z-index: 60;
   width: min(360px, calc(100vw - 24px));
+  max-height: min(78vh, 720px);
+  overflow: auto;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -304,7 +311,8 @@ button {
   font-weight: 800;
 }
 
-.settings-field select {
+.settings-field select,
+.settings-field input {
   width: 100%;
   height: 38px;
   border: 1px solid var(--border);
@@ -315,6 +323,10 @@ button {
   padding: 0 10px;
   font-size: 13px;
   font-weight: 700;
+}
+
+.settings-field input::placeholder {
+  color: var(--text-light);
 }
 
 .switch-row {
@@ -1124,6 +1136,85 @@ h3 {
   padding: 14px;
 }
 
+.ai-assistant-card {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-assistant-card .panel-title {
+  width: 100%;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.ai-assistant-card .panel-title span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-assistant-card .panel-title small {
+  flex: 0 0 auto;
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ai-prompt {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-dark);
+  outline: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-prompt:focus {
+  border-color: color-mix(in srgb, var(--primary) 54%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-response {
+  min-height: 96px;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--editor-bg);
+  color: var(--editor-text);
+}
+
+.ai-response pre {
+  margin: 0;
+  padding: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ai-empty {
+  padding: 12px;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .compact-section {
   flex: 0 0 auto;
 }
@@ -1726,7 +1817,8 @@ h3 {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(180px, auto) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: auto;
   background: var(--surface-muted);
 }
 
@@ -2418,6 +2510,7 @@ h3 {
 .builder-panel textarea:focus,
 .visual-controls select:focus,
 .settings-field select:focus,
+.settings-field input:focus,
 .switch-row input:focus-visible,
 #sqlEditor:focus,
 .icon-button:focus-visible,

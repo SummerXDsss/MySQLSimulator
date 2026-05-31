@@ -10,12 +10,14 @@ const jsFormatBtn = document.querySelector("#jsFormatBtn");
 const jsImportBtn = document.querySelector("#jsImportBtn");
 const jsExportBtn = document.querySelector("#jsExportBtn");
 const jsShareBtn = document.querySelector("#jsShareBtn");
+const jsOpenAiBtn = document.querySelector("#jsOpenAiBtn");
 const jsFileInput = document.querySelector("#jsFileInput");
 const jsClearOutputBtn = document.querySelector("#jsClearOutputBtn");
 const jsOutput = document.querySelector("#jsOutput");
 const jsRiskList = document.querySelector("#jsRiskList");
 const jsStatus = document.querySelector("#jsStatus");
 const jsExtractStatus = document.querySelector("#jsExtractStatus");
+const jsNavAiBtn = document.querySelector("#jsNavAiBtn");
 const jsInterpreterSelect = document.querySelector("#jsInterpreterSelect");
 const jsInterpreterBadge = document.querySelector("#jsInterpreterBadge");
 const jsSettingsToggle = document.querySelector("#jsSettingsToggle");
@@ -85,18 +87,22 @@ let jsRedoStack = [];
 let lastHistoryValue = "";
 let applyingHistory = false;
 
-const jsExample = `<main>
-  <h1>这里只会执行 script 里的 JavaScript</h1>
+const jsExample = `<main style="font-family: system-ui; padding: 24px">
+  <h1>按钮事件演示</h1>
+  <p id="countText">当前点击：0 次</p>
+  <button id="addBtn" style="padding: 10px 16px; border: 0; border-radius: 8px; background: #2563eb; color: white; font-weight: 700">
+    点击 +1
+  </button>
   <script>
-    const students = ["Nora", "Evan", "Mia"];
-    const rows = students.map((name, index) => ({
-      id: index + 1,
-      name,
-      passed: name !== "Evan"
-    }));
+    let count = 0;
+    const button = document.querySelector("#addBtn");
+    const countText = document.querySelector("#countText");
 
-    console.table(rows);
-    console.log("通过人数", rows.filter((row) => row.passed).length);
+    button.addEventListener("click", () => {
+      count += 1;
+      countText.textContent = "当前点击：" + count + " 次";
+      console.log("按钮点击", count);
+    });
   </script>
 </main>`;
 
@@ -344,6 +350,48 @@ function insertAtSelection(text, cursorOffset = text.length, options = {}) {
   refreshRiskState();
 }
 
+function buildJsAiContext() {
+  const interpreterLabel = jsInterpreterSelect?.selectedOptions?.[0]?.textContent || jsPrefs.interpreter;
+  return [
+    `场景：JavaScript 课程模拟器`,
+    `解释器：${interpreterLabel}`,
+    `当前代码:\n${jsEditor.value}`,
+    `风险状态：${jsRiskList?.textContent?.trim() || "暂无"}`,
+    `最近输出：${jsOutput?.textContent?.trim() || "暂无输出"}`
+  ].join("\n\n");
+}
+
+function setupJsAiAssistant() {
+  if (!window.SqlSimAiAssistant) return;
+  window.SqlSimAiAssistant.create({
+    kind: "JavaScript/HTML",
+    language: "javascript",
+    getContext: buildJsAiContext,
+    insertText: (text) => insertAtSelection(String(text || ""), String(text || "").length),
+    setStatus: (message) => {
+      jsStatus.textContent = message;
+    },
+    elements: {
+      baseUrl: document.querySelector("#jsAiBaseUrlInput"),
+      requestPath: document.querySelector("#jsAiRequestPathInput"),
+      model: document.querySelector("#jsAiModelInput"),
+      apiKey: document.querySelector("#jsAiApiKeyInput"),
+      prompt: document.querySelector("#jsAiPromptInput"),
+      askButton: document.querySelector("#jsAskAiBtn"),
+      insertButton: document.querySelector("#jsInsertAiAnswerBtn"),
+      response: document.querySelector("#jsAiResponse"),
+      configState: document.querySelector("#jsAiConfigState")
+    }
+  });
+}
+
+function focusJsAiPanel() {
+  const panel = document.querySelector(".ai-assistant-card");
+  const prompt = document.querySelector("#jsAiPromptInput");
+  panel?.scrollIntoView({ behavior: "smooth", block: "center" });
+  window.setTimeout(() => prompt?.focus(), 220);
+}
+
 function refreshRiskState(options = {}) {
   const extraction = extractJavaScript(jsEditor.value, jsPrefs.interpreter);
   const analysis = extraction.errors?.length
@@ -353,6 +401,7 @@ function refreshRiskState(options = {}) {
     ? "NodeJS JavaScript"
     : jsPrefs.interpreter === "html-preview"
       ? "HTML 预览（含 CSS/JS）"
+      : extraction.mode === "html-render" ? "HTML + script 渲染"
       : extraction.mode === "html-script" ? "已提取 script" : "JavaScript only";
   renderRisks(analysis, extraction);
   if (options.showSuggestions === false) {
@@ -674,7 +723,7 @@ function analyzeJavaScript(code, interpreter = jsPrefs.interpreter) {
     [/\bset(?:Timeout|Interval)\s*\(\s*['"`]/i, "禁止字符串形式的定时执行"],
     [/\.\s*constructor\b|\[\s*["']constructor["']\s*\]|\bconstructor\s*\.\s*constructor\b/i, "禁止构造器逃逸写法"],
     [/\b(__sqlsimPost__|__sqlsimBlocked__|__sqlsimSend__|__sqlsimFormat__|__sqlsimMaxOutput__)\b/i, "禁止访问沙箱内部变量"],
-    [/\b(?:globalThis|self)\s*\.\s*(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\b|\b(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\s*\(/i, "禁止直接操作 Worker 全局通信能力"]
+    [/\b(?:globalThis|self|window)\s*\.\s*(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\b|(^|[^\w$.])(postMessage|close|dispatchEvent|addEventListener|removeEventListener)\s*\(/i, "禁止直接操作 Worker 全局通信能力"]
   ];
 
   const target = interpreter === "html-preview" ? scanText : text;
@@ -710,6 +759,7 @@ function renderRisks(analysis, extraction) {
 }
 
 function renderOutput(lines) {
+  jsOutputLines = lines.slice();
   if (!lines.length) {
     jsOutput.innerHTML = '<div class="js-output-empty">暂无输出</div>';
     return;
@@ -720,6 +770,13 @@ function renderOutput(lines) {
       <code>${escapeHtml(line.message)}</code>
     </div>
   `).join("");
+}
+
+let jsOutputLines = [];
+
+function appendOutputLine(line) {
+  jsOutputLines = [...jsOutputLines, line].slice(-80);
+  renderOutput(jsOutputLines);
 }
 
 function formatConsoleValue(value) {
@@ -901,7 +958,7 @@ function renderPreviewWatermark(ip) {
 function buildPreviewSrcdoc(html, ip) {
   const display = jsPreviewState.maskIp ? maskIpForWatermark(ip) : ip;
   const safeIp = String(display || "unknown").replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&#39;" }[c]));
-  const guard = `\n<script>(() => {\n  const block = (name) => () => { throw new Error("受限沙箱：" + name + " 已被禁用"); };\n  try { window.fetch = block("fetch"); } catch {}\n  try { window.XMLHttpRequest = function(){ throw new Error("受限沙箱：XMLHttpRequest 已被禁用"); }; } catch {}\n  try { window.WebSocket = function(){ throw new Error("受限沙箱：WebSocket 已被禁用"); }; } catch {}\n  try { window.EventSource = function(){ throw new Error("受限沙箱：EventSource 已被禁用"); }; } catch {}\n  try { Object.defineProperty(window, "localStorage", { get: block("localStorage") }); } catch {}\n  try { Object.defineProperty(window, "sessionStorage", { get: block("sessionStorage") }); } catch {}\n  try { Object.defineProperty(window, "indexedDB", { get: block("indexedDB") }); } catch {}\n  try { Object.defineProperty(document, "cookie", { get: () => "", set: block("document.cookie") }); } catch {}\n  try { window.eval = block("eval"); } catch {}\n  try { window.Function = function(){ throw new Error("受限沙箱：Function 构造器已被禁用"); }; } catch {}\n})();</script>\n`;
+  const guard = `\n<script>(() => {\n  const block = (name) => () => { throw new Error("受限沙箱：" + name + " 已被禁用"); };\n  const format = (value) => {\n    if (typeof value === "string") return value;\n    try { return JSON.stringify(value, null, 2); } catch { return String(value); }\n  };\n  const send = (type, args) => {\n    try { window.parent.postMessage({ source: "sqlsim-js-preview", type, message: Array.from(args).map(format).join(" ") }, "*"); } catch {}\n  };\n  const nativeConsole = window.console || {};\n  window.console = {\n    log: (...args) => { try { nativeConsole.log?.(...args); } catch {} send("log", args); },\n    info: (...args) => { try { nativeConsole.info?.(...args); } catch {} send("info", args); },\n    warn: (...args) => { try { nativeConsole.warn?.(...args); } catch {} send("warn", args); },\n    error: (...args) => { try { nativeConsole.error?.(...args); } catch {} send("error", args); },\n    table: (...args) => { try { nativeConsole.table?.(...args); } catch {} send("table", args); }\n  };\n  window.addEventListener("error", (event) => send("error", [event.message || "预览脚本错误"]));\n  window.addEventListener("unhandledrejection", (event) => send("error", [event.reason && event.reason.message ? event.reason.message : event.reason || "Promise 拒绝"]));\n  try { window.fetch = block("fetch"); } catch {}\n  try { window.XMLHttpRequest = function(){ throw new Error("受限沙箱：XMLHttpRequest 已被禁用"); }; } catch {}\n  try { window.WebSocket = function(){ throw new Error("受限沙箱：WebSocket 已被禁用"); }; } catch {}\n  try { window.EventSource = function(){ throw new Error("受限沙箱：EventSource 已被禁用"); }; } catch {}\n  try { Object.defineProperty(window, "localStorage", { get: block("localStorage") }); } catch {}\n  try { Object.defineProperty(window, "sessionStorage", { get: block("sessionStorage") }); } catch {}\n  try { Object.defineProperty(window, "indexedDB", { get: block("indexedDB") }); } catch {}\n  try { Object.defineProperty(document, "cookie", { get: () => "", set: block("document.cookie") }); } catch {}\n  try { window.eval = block("eval"); } catch {}\n  try { window.Function = function(){ throw new Error("受限沙箱：Function 构造器已被禁用"); }; } catch {}\n})();</script>\n`;
 
   // 水印铺满整个预览：用 SVG data-URI 重复贴图实现，30° 倾斜，cover 整个 viewport。
   const text = `IP ${safeIp} · 预览仅本机可见`;
@@ -909,9 +966,18 @@ function buildPreviewSrcdoc(html, ip) {
   const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   const watermarkStyle = `\n<style>\n#__sqlsim_watermark__ {\n  position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;\n  background-image: url("${dataUri}");\n  background-repeat: repeat;\n  background-size: 320px 180px;\n  -webkit-user-select: none; user-select: none;\n}\n@media (prefers-color-scheme: dark) {\n  #__sqlsim_watermark__ { mix-blend-mode: difference; opacity: 0.85; }\n}\n</style>\n`;
   const watermark = `${watermarkStyle}<div id="__sqlsim_watermark__" aria-hidden="true"></div>\n`;
-  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${watermark}${guard}</body>`);
-  if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, `${watermark}${guard}</html>`);
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}\n${watermark}${guard}</body></html>`;
+  const prelude = `<meta charset="utf-8">${guard}`;
+  let guardedHtml = html;
+  if (/<head\b[^>]*>/i.test(guardedHtml)) {
+    guardedHtml = guardedHtml.replace(/<head\b[^>]*>/i, (tag) => `${tag}${prelude}`);
+  } else if (/<html\b[^>]*>/i.test(guardedHtml)) {
+    guardedHtml = guardedHtml.replace(/<html\b[^>]*>/i, (tag) => `${tag}<head>${prelude}</head>`);
+  } else {
+    guardedHtml = `<!doctype html><html><head>${prelude}</head><body>${guardedHtml}</body></html>`;
+  }
+  if (/<\/body>/i.test(guardedHtml)) return guardedHtml.replace(/<\/body>/i, `${watermark}</body>`);
+  if (/<\/html>/i.test(guardedHtml)) return guardedHtml.replace(/<\/html>/i, `${watermark}</html>`);
+  return `${guardedHtml}${watermark}`;
 }
 
 const jsPreviewState = {
@@ -988,6 +1054,7 @@ async function runCurrentJavaScript() {
 }
 
 jsEditor.value = jsExample;
+setupJsAiAssistant();
 updateJsHighlight();
 refreshRiskState({ showSuggestions: false });
 renderOutput([]);
@@ -998,12 +1065,20 @@ window.lucide?.createIcons({ attrs: { "stroke-width": 1.5 } });
 
 jsRunBtn.addEventListener("click", runCurrentJavaScript);
 jsRefreshPreviewBtn?.addEventListener("click", () => {
-  if (jsPrefs.interpreter === "html-preview") runCurrentJavaScript();
+  if (!jsPreviewSection?.hidden || jsPrefs.interpreter === "html-preview") runCurrentJavaScript();
 });
 jsPreviewMaskIpBtn?.addEventListener("click", () => {
   setPreviewIpMasked(!jsPreviewState.maskIp);
 });
 setPreviewIpMasked(jsPreviewState.maskIp);
+window.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (data.source !== "sqlsim-js-preview") return;
+  appendOutputLine({
+    type: data.type || "log",
+    message: formatConsoleValue(data.message || "")
+  });
+});
 jsExampleBtn.addEventListener("click", () => {
   setEditorValue(jsExample);
   jsStatus.textContent = "已载入示例";
@@ -1034,6 +1109,8 @@ jsExportBtn?.addEventListener("click", () => {
   jsStatus.textContent = "已导出";
 });
 jsShareBtn?.addEventListener("click", () => setShareDialogOpen(true));
+jsNavAiBtn?.addEventListener("click", focusJsAiPanel);
+jsOpenAiBtn?.addEventListener("click", focusJsAiPanel);
 jsShareClose?.addEventListener("click", () => setShareDialogOpen(false));
 jsShareCancel?.addEventListener("click", () => setShareDialogOpen(false));
 jsShareAgree?.addEventListener("change", () => renderShareRisks(analyzeShareableJs()));

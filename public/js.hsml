@@ -36,6 +36,10 @@
             <i data-lucide="moon"></i>
             <span>深色模式</span>
           </button>
+          <button id="jsNavAiBtn" class="nav-tool-button ai-nav-button" type="button" title="打开问 AI">
+            <i data-lucide="bot"></i>
+            <span>问 AI</span>
+          </button>
           <div class="settings-wrap">
             <button id="jsSettingsToggle" class="nav-tool-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="jsSettingsPanel">
               <i data-lucide="settings"></i>
@@ -55,6 +59,22 @@
                   <option value="nodejs">NodeJS 解释器</option>
                   <option value="html-preview">网页预览模式</option>
                 </select>
+              </label>
+              <label class="settings-field">
+                <span>AI 接口地址</span>
+                <input id="jsAiBaseUrlInput" type="text" placeholder="https://api.example.com" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI 请求地址</span>
+                <input id="jsAiRequestPathInput" type="text" placeholder="/v1/chat/completions" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI 模型</span>
+                <input id="jsAiModelInput" type="text" placeholder="可选" autocomplete="off" />
+              </label>
+              <label class="settings-field">
+                <span>AI Key</span>
+                <input id="jsAiApiKeyInput" type="password" placeholder="可选，只保存在本机浏览器" autocomplete="off" />
               </label>
             </div>
           </div>
@@ -117,6 +137,10 @@
                       <i data-lucide="share-2"></i>
                       <span>分享</span>
                     </button>
+                    <button id="jsOpenAiBtn" class="tool-button" type="button" title="打开问 AI">
+                      <i data-lucide="bot"></i>
+                      <span>问 AI</span>
+                    </button>
                   </div>
                   <button id="jsRunBtn" class="run-button" type="button">
                     <i data-lucide="play"></i>
@@ -155,6 +179,27 @@
                   风险控制
                 </div>
                 <div id="jsRiskList" class="js-risk-list"></div>
+              </section>
+
+              <section class="side-section ai-assistant-card">
+                <div class="panel-title">
+                  <span><i data-lucide="bot"></i> 问 AI</span>
+                  <small id="jsAiConfigState">未配置</small>
+                </div>
+                <textarea id="jsAiPromptInput" class="ai-prompt" placeholder="问 JS、DOM、按钮事件、报错原因或让 AI 改写当前代码"></textarea>
+                <div class="ai-actions">
+                  <button id="jsAskAiBtn" class="primary-small" type="button">
+                    <i data-lucide="sparkles"></i>
+                    发送
+                  </button>
+                  <button id="jsInsertAiAnswerBtn" class="tool-button compact" type="button" hidden>
+                    <i data-lucide="corner-down-left"></i>
+                    插入回复
+                  </button>
+                </div>
+                <div id="jsAiResponse" class="ai-response">
+                  <div class="ai-empty">在设置里配置接口地址和请求路径后使用。</div>
+                </div>
               </section>
 
               <section class="side-section">
@@ -246,6 +291,7 @@
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script src="/theme.js"></script>
+    <script src="/ai-assistant.js"></script>
     <script src="/js-tool.js"></script>
     <script src="/version.js"></script>
   </body>
